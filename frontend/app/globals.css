@@ -2,13 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Amazon Ember Display';
+  src: url('/fonts/AmazonEmberDisplay_Rg.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Amazon Ember Display';
+  src: url('/fonts/AmazonEmberDisplay_Bd.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Amazon Ember Display';
+  src: url('/fonts/AmazonEmberDisplay_Lt.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Amazon Ember Display';
+  src: url('/fonts/AmazonEmberDisplay_Md.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Amazon Ember Display';
+  src: url('/fonts/AmazonEmberDisplay_He.ttf') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+}
+
 :root {
+  font-family: var(--font-amazon-ember), system-ui, sans-serif;
   --lk-va-bar-width: 72px;
   --lk-control-bar-height: unset;
+  background-color: #0E1A27;
 }
 
 .agent-visualizer > .lk-audio-bar {
   width: 72px;
+}
+
+.agent-visualizer {
+  background: none;
+}
+
+.agent-visualizer > div {
+  background: none;
 }
 
 .lk-agent-control-bar {

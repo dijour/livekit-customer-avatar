@@ -1,8 +1,17 @@
 import useCombinedTranscriptions from "@hooks/useCombinedTranscriptions";
+import { RoomContext } from "@livekit/components-react";
 import * as React from "react";
+import { RoomContextType } from "../types/room";
 
 export default function TranscriptionView() {
+  const { isSimulation } = React.useContext(RoomContext) as RoomContextType;
   const combinedTranscriptions = useCombinedTranscriptions();
+  const dummyTranscriptions = React.useMemo(() => [
+    { id: '1', role: 'user', text: 'Hello, can you help me with my project?' },
+    { id: '2', role: 'assistant', text: 'Of course! I\'d be happy to help. What kind of project are you working on?' },
+    { id: '3', role: 'user', text: 'I\'m building a React application and having trouble with state management.' },
+    { id: '4', role: 'assistant', text: 'I see. There are several approaches to state management in React. Could you tell me more about your specific requirements?' }
+  ], []);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   // scroll to bottom when new transcription is added
@@ -15,19 +24,17 @@ export default function TranscriptionView() {
   return (
     <div className="relative h-[200px] w-[512px] max-w-[90vw] mx-auto">
       {/* Fade-out gradient mask */}
-      <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[var(--lk-bg)] to-transparent z-10 pointer-events-none" />
-      <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--lk-bg)] to-transparent z-10 pointer-events-none" />
 
       {/* Scrollable content */}
       <div ref={containerRef} className="h-full flex flex-col gap-2 overflow-y-auto px-4 py-8">
-        {combinedTranscriptions.map((segment) => (
+        {(isSimulation ? dummyTranscriptions : combinedTranscriptions).map((segment) => (
           <div
             id={segment.id}
             key={segment.id}
             className={
               segment.role === "assistant"
                 ? "p-2 self-start fit-content"
-                : "bg-gray-800 rounded-md p-2 self-end fit-content"
+                : "bg-[#0078BE]/[0.16] rounded-l-xl rounded-br-xl px-4 py-3 self-end fit-content"
             }
           >
             {segment.text}

@@ -14,11 +14,13 @@ import {
 } from "@livekit/components-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Room, RoomEvent } from "livekit-client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import type { ConnectionDetails } from "./api/connection-details/route";
+import type { RoomContextType } from "../types/room";
 
 export default function Page() {
   const [room] = useState(new Room());
+  const [isSimulation, setIsSimulation] = useState(false);
 
   const onConnectButtonClicked = useCallback(async () => {
     // Generate room connection details, including:
@@ -51,20 +53,32 @@ export default function Page() {
 
   return (
     // anchor
-    <main data-lk-theme="default" className="h-full grid content-center bg-[var(--lk-bg)]">
-      <div className="w-full flex justify-center mb-8">
-        <img src="assets/hedra_logo.svg" alt="Hedra Logo" className="h-16 w-auto" />
-      </div>
-      <RoomContext.Provider value={room}>
-        <div className="lk-room-container max-w-[1024px] w-[90vw] mx-auto max-h-[90vh]">
-          <SimpleVoiceAssistant onConnectButtonClicked={onConnectButtonClicked} />
+    <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-full grid content-center bg-[#0E1A27]">
+      <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
+        <div className=" max-w-[1024px] w-[90vw] mx-auto max-h-[90vh]">
+          <SimpleVoiceAssistant 
+            onConnectButtonClicked={onConnectButtonClicked}
+            isSimulation={isSimulation}
+            setIsSimulation={setIsSimulation}
+          />
         </div>
       </RoomContext.Provider>
     </main>
   );
 }
 
-function SimpleVoiceAssistant(props: { onConnectButtonClicked: () => void }) {
+const DUMMY_CONVERSATION = [
+  { id: '1', role: 'user', text: 'Hello, can you help me with my project?' },
+  { id: '2', role: 'assistant', text: 'Of course! I\'d be happy to help. What kind of project are you working on?' },
+  { id: '3', role: 'user', text: 'I\'m building a React application and having trouble with state management.' },
+  { id: '4', role: 'assistant', text: 'I see. There are several approaches to state management in React. Could you tell me more about your specific requirements?' }
+];
+
+function SimpleVoiceAssistant(props: { 
+  onConnectButtonClicked: () => void;
+  isSimulation: boolean;
+  setIsSimulation: (value: boolean) => void;
+}) {
   const { state: agentState } = useVoiceAssistant();
 
   return (
@@ -83,7 +97,7 @@ function SimpleVoiceAssistant(props: { onConnectButtonClicked: () => void }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3, delay: 0.1 }}
-              className="uppercase px-4 py-2 bg-white text-black rounded-md"
+              className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
               onClick={() => props.onConnectButtonClicked()}
             >
               Start a conversation
@@ -116,6 +130,14 @@ function SimpleVoiceAssistant(props: { onConnectButtonClicked: () => void }) {
 
 function AgentVisualizer() {
   const { state: agentState, videoTrack, audioTrack } = useVoiceAssistant();
+  const { isSimulation } = useContext(RoomContext) as RoomContextType;
+  if (isSimulation) {
+    return (
+      <div className="h-[512px] w-[512px] rounded-lg overflow-hidden bg-gray-800 flex items-center justify-center">
+        <img src="/images/martha.png" alt="AI Agent" />
+      </div>
+    );
+  }
   if (videoTrack) {
     return (
       <div className="h-[512px] w-[512px] rounded-lg overflow-hidden">
@@ -137,6 +159,7 @@ function AgentVisualizer() {
 }
 
 function ControlBar(props: { onConnectButtonClicked: () => void }) {
+  const { isSimulation, setIsSimulation } = useContext(RoomContext) as RoomContextType;
   const { state: agentState } = useVoiceAssistant();
 
   return (
