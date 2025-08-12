@@ -3,6 +3,7 @@
 import { CloseIcon } from "@components/CloseIcon";
 import { NoAgentNotification } from "@components/NoAgentNotification";
 import TranscriptionView from "@components/TranscriptionView";
+import PhotoCapture from "@components/PhotoCapture";
 import {
   BarVisualizer,
   DisconnectButton,
@@ -21,6 +22,63 @@ import type { RoomContextType } from "../types/room";
 export default function Page() {
   const [room] = useState(new Room());
   const [isSimulation, setIsSimulation] = useState(false);
+  const [showPhotoCapture, setShowPhotoCapture] = useState(true);
+  const [userPhoto, setUserPhoto] = useState<Blob | null>(null);
+
+  const handlePhotoCapture = useCallback(async (photoBlob: Blob) => {
+    setUserPhoto(photoBlob);
+    setShowPhotoCapture(false);
+    console.log("Photo captured:", photoBlob);
+    
+    try {
+      // Send photo to Hedra API for avatar creation
+      const formData = new FormData();
+      formData.append("photo", photoBlob, "avatar-photo.jpg");
+      
+      console.log("Sending photo to Hedra API...");
+      
+      const response = await fetch("/api/create-avatar", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log("Hedra asset created successfully:", result);
+      
+      // Store the asset ID for use in the agent
+      if (result.assetId) {
+        localStorage.setItem("hedraAssetId", result.assetId);
+        console.log("Stored asset ID:", result.assetId);
+        
+        // Also set it for the backend agent
+        try {
+          await fetch("/api/set-avatar-id", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ assetId: result.assetId }),
+          });
+          console.log("Asset ID set for backend agent");
+        } catch (error) {
+          console.error("Failed to set asset ID for backend:", error);
+        }
+      }
+      
+    } catch (error) {
+      console.error("Failed to create Hedra avatar:", error);
+      // Continue anyway - the conversation can still work without the avatar
+    }
+  }, []);
+
+  const handleSkipPhoto = useCallback(() => {
+    setShowPhotoCapture(false);
+    console.log("Photo capture skipped");
+  }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
     // Generate room connection details, including:
@@ -36,8 +94,27 @@ export default function Page() {
       process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
       window.location.origin
     );
-    const response = await fetch(url.toString());
+    
+    // Check if we have an asset ID from photo capture
+    const assetId = localStorage.getItem("hedraAssetId");
+    
+    let response;
+    if (assetId) {
+      // Send asset ID via POST request
+      response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ assetId }),
+      });
+    } else {
+      // Use GET request if no asset ID
+      response = await fetch(url.toString());
+    }
+    
     const connectionDetailsData: ConnectionDetails = await response.json();
+    console.log("Connection details:", connectionDetailsData);
 
     await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
     await room.localParticipant.setMicrophoneEnabled(true);
@@ -56,11 +133,22 @@ export default function Page() {
     <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-full grid content-center bg-[#0E1A27]">
       <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
         <div className=" max-w-[1024px] w-[90vw] mx-auto max-h-[90vh]">
-          <SimpleVoiceAssistant 
-            onConnectButtonClicked={onConnectButtonClicked}
-            isSimulation={isSimulation}
-            setIsSimulation={setIsSimulation}
-          />
+          <AnimatePresence mode="wait">
+            {showPhotoCapture ? (
+              <PhotoCapture 
+                key="photo-capture"
+                onPhotoCapture={handlePhotoCapture}
+                onSkip={handleSkipPhoto}
+              />
+            ) : (
+              <SimpleVoiceAssistant 
+                key="voice-assistant"
+                onConnectButtonClicked={onConnectButtonClicked}
+                isSimulation={isSimulation}
+                setIsSimulation={setIsSimulation}
+              />
+            )}
+          </AnimatePresence>
         </div>
       </RoomContext.Provider>
     </main>
@@ -159,7 +247,6 @@ function AgentVisualizer() {
 }
 
 function ControlBar(props: { onConnectButtonClicked: () => void }) {
-  const { isSimulation, setIsSimulation } = useContext(RoomContext) as RoomContextType;
   const { state: agentState } = useVoiceAssistant();
 
   return (
