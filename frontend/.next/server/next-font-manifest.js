@@ -1,1 +1,0 @@
-self.__NEXT_FONT_MANIFEST="{\"pages\":{},\"app\":{\"/Users/dzd/Documents/Code/Amazon/Hedra Testing/hedra-test/frontend/app/layout\":[\"static/media/39883d31a7792467-s.p.woff2\"]},\"appUsingSizeAdjust\":true,\"pagesUsingSizeAdjust\":false}"
