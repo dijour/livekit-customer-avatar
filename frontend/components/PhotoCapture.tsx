@@ -14,7 +14,10 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
 
   const startCamera = useCallback(async () => {
     try {
@@ -87,18 +90,89 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
 
   const retakePhoto = useCallback(() => {
     setCapturedPhoto(null);
+    setEnhancedPhoto(null);
+    setCurrentStep('capture');
     startCamera();
   }, [startCamera]);
 
-  const confirmPhoto = useCallback(() => {
+  const useOriginalPhoto = useCallback(() => {
+    setCurrentStep('confirm');
+  }, []);
+
+  const enhancePhoto = useCallback(async () => {
     if (!canvasRef.current) return;
 
-    canvasRef.current.toBlob((blob) => {
-      if (blob) {
-        onPhotoCapture(blob);
+    setIsEnhancing(true);
+    setError(null);
+
+    try {
+      // Convert canvas to blob for upload
+      const blob = await new Promise<Blob>((resolve) => {
+        canvasRef.current!.toBlob((blob) => {
+          if (blob) resolve(blob);
+        }, "image/jpeg", 0.8);
+      });
+
+      // Create form data for API call
+      const formData = new FormData();
+      formData.append("image", blob, "photo.jpg");
+
+      // Call OpenAI enhancement API
+      const response = await fetch("/api/enhance-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Enhancement failed: ${response.status}`);
       }
-    }, "image/jpeg", 0.8);
-  }, [onPhotoCapture]);
+
+      const result = await response.json();
+      
+      if (result.success && result.enhancedImage) {
+        // Convert base64 to blob URL for display
+        const enhancedImageBlob = new Blob(
+          [Uint8Array.from(atob(result.enhancedImage), c => c.charCodeAt(0))],
+          { type: "image/png" }
+        );
+        const enhancedUrl = URL.createObjectURL(enhancedImageBlob);
+        setEnhancedPhoto(enhancedUrl);
+        setCurrentStep('confirm');
+      } else {
+        throw new Error("No enhanced image received");
+      }
+    } catch (error) {
+      console.error("Enhancement failed:", error);
+      setError("Failed to enhance image. Using original photo instead.");
+      // Fall back to original photo
+      setCurrentStep('confirm');
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, []);
+
+  const confirmPhoto = useCallback(() => {
+    // Use enhanced photo if available, otherwise use original
+    const photoToUse = enhancedPhoto || capturedPhoto;
+    
+    if (enhancedPhoto) {
+      // Convert enhanced photo URL back to blob
+      fetch(enhancedPhoto)
+        .then(res => res.blob())
+        .then(blob => onPhotoCapture(blob))
+        .catch(() => {
+          // Fallback to canvas if enhanced photo fails
+          canvasRef.current?.toBlob((blob) => {
+            if (blob) onPhotoCapture(blob);
+          }, "image/jpeg", 0.8);
+        });
+    } else {
+      // Use original canvas
+      canvasRef.current?.toBlob((blob) => {
+        if (blob) onPhotoCapture(blob);
+      }, "image/jpeg", 0.8);
+    }
+  }, [onPhotoCapture, enhancedPhoto, capturedPhoto]);
 
   // Cleanup on unmount
   React.useEffect(() => {
@@ -107,8 +181,11 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       if (capturedPhoto) {
         URL.revokeObjectURL(capturedPhoto);
       }
+      if (enhancedPhoto) {
+        URL.revokeObjectURL(enhancedPhoto);
+      }
     };
-  }, [stopCamera, capturedPhoto]);
+  }, [stopCamera, capturedPhoto, enhancedPhoto]);
 
   return (
     <motion.div
@@ -121,14 +198,35 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       
 
       <div className="relative">
-        {/* Video preview or captured photo */}
+        {/* Video preview, captured photo, or enhanced photo */}
         <div className="w-[400px] h-[400px] rounded-lg overflow-hidden bg-black">
-          {capturedPhoto ? (
-            <img
-              src={capturedPhoto}
-              alt="Captured photo"
-              className="w-full h-full object-cover"
-            />
+          {currentStep === 'confirm' && enhancedPhoto ? (
+            <div className="relative w-full h-full">
+              <img
+                src={enhancedPhoto}
+                alt="Enhanced photo"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 rounded text-sm">
+                ✨ Enhanced
+              </div>
+            </div>
+          ) : capturedPhoto ? (
+            <div className="relative w-full h-full">
+              <img
+                src={capturedPhoto}
+                alt="Captured photo"
+                className="w-full h-full object-cover"
+              />
+              {isEnhancing && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <div className="text-white text-center">
+                    <div className="animate-spin text-2xl mb-2">⚡</div>
+                    <p>Enhancing with AI...</p>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : isStreaming ? (
             <video
               ref={videoRef}
@@ -166,7 +264,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       )}
 
       {/* Controls */}
-      <div className="flex gap-4">
+      <div className="flex gap-4 flex-wrap justify-center">
         <AnimatePresence mode="wait">
           {!isStreaming && !capturedPhoto && (
             <motion.button
@@ -194,7 +292,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
             </motion.button>
           )}
 
-          {capturedPhoto && (
+          {capturedPhoto && currentStep === 'capture' && (
             <>
               <motion.button
                 key="retake"
@@ -207,7 +305,43 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
                 Retake
               </motion.button>
               <motion.button
-                key="confirm"
+                key="enhance"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                onClick={enhancePhoto}
+                disabled={isEnhancing}
+                className="px-6 py-3  bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%] disabled:opacity-50"
+              >
+                {isEnhancing ? "Enhancing..." : "Enhance"}
+              </motion.button>
+              <motion.button
+                key="use-original"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                onClick={useOriginalPhoto}
+                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
+              >
+                Use Original
+              </motion.button>
+            </>
+          )}
+
+          {currentStep === 'confirm' && (
+            <>
+              <motion.button
+                key="retake-confirm"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                onClick={retakePhoto}
+                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
+              >
+                Retake
+              </motion.button>
+              <motion.button
+                key="confirm-final"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
