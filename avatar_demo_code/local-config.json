@@ -1,0 +1,22 @@
+{
+  "KMSProfile": "default",
+  "KMSRegion": "us-west-2",
+  "KMSKeyAlias": "alias/DemoDogsJWT",
+  "JWTIssuerHost": "https://gs0cv0kxi1.execute-api.us-east-1.amazonaws.com",
+  "ServicesURL": "https://ia7v2iyc6i.execute-api.us-east-1.amazonaws.com/services",
+  "LocalServerAWSProfile": "default",
+  "DynamoTableName": "",
+  "userId": "LOCAL.USER.JINSA-MAC",
+  "deviceId": "LOCAL.DEVICE.JINSA-MAC",
+  "skillId": "LOCAL.SKILL.JINSA-MAC",
+  "startQuietly": true,
+  "saveImagesLocally": true,
+  "saveAudioLocally": false,
+  "localServerPort": 80,
+  "enableLLMAnalysisLogging": false,
+  "llmAnalysisLambdaARN": "",
+  "llmAnalysisAWSProfile": "",
+  "llmAnalysisRegion": "",
+  "llmAnalysisCustomMetrics": [],
+  "consumableISPNames": []
+}
