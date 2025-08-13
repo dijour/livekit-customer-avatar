@@ -70,7 +70,7 @@ async def entrypoint(ctx: agents.JobContext):
     )
 
     await session.generate_reply(
-        # instructions="Greet the user and offer your assistance."
+        instructions="Greet the user and offer your assistance."
     )
 
 

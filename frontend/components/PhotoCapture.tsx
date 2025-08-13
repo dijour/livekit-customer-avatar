@@ -207,9 +207,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
                 alt="Enhanced photo"
                 className="w-full h-full object-cover"
               />
-              <div className="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 rounded text-sm">
-                ✨ Enhanced
-              </div>
+              
             </div>
           ) : capturedPhoto ? (
             <div className="relative w-full h-full">
@@ -221,8 +219,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
               {isEnhancing && (
                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                   <div className="text-white text-center">
-                    <div className="animate-spin text-2xl mb-2">⚡</div>
-                    <p>Enhancing with AI...</p>
+                    <p>Enhancing</p>
                   </div>
                 </div>
               )}
