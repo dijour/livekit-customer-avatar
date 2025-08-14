@@ -8,7 +8,6 @@ from livekit.agents import Agent, AgentSession, JobContext, RoomInputOptions, Ro
 from livekit.plugins import (
     hedra,
     openai,
-    noise_cancellation,
 )
 from livekit.api import ListParticipantsRequest
 

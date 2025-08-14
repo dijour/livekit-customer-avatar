@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "./Button";
 import { MaskedMediaView } from "./MaskedMediaView";
@@ -10,7 +10,12 @@ interface PhotoCaptureProps {
   onSkip: () => void;
 }
 
-export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCaptureProps) {
+export interface PhotoCaptureRef {
+  startCamera: () => void;
+  capturePhoto: () => void;
+}
+
+const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -25,27 +30,26 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
 
   const startCamera = useCallback(async () => {
+    console.log('🎥 PhotoCapture: startCamera() called');
     try {
       setError(null);
-      console.log("Starting camera...");
-      
+      console.log('🎥 PhotoCapture: Requesting camera access...');
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: { ideal: 512 },
-          height: { ideal: 512 },
-          facingMode: "user"
-        }
+        video: { facingMode: "user" },
+        audio: false,
       });
       
-      console.log("Got media stream:", mediaStream);
-      console.log("Video tracks:", mediaStream.getVideoTracks());
+      console.log('🎥 PhotoCapture: Camera access granted, setting video source');
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
       
-      // Set stream and streaming state to trigger video element rendering
       setStream(mediaStream);
       setIsStreaming(true);
-      
+      console.log('🎥 PhotoCapture: Camera started successfully');
     } catch (err) {
-      setError("Failed to access camera. Please ensure camera permissions are granted.");
+      console.error("🎥 PhotoCapture ERROR accessing camera:", err);
+      setError("Failed to access camera. Please check permissions.");
       console.error("Camera access error:", err);
     }
   }, []);
@@ -98,6 +102,12 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       }
     }, "image/jpeg", 0.8);
   }, [stopCamera, isModifyMode, onPhotoCapture]);
+
+  // Expose methods to parent component via ref
+  useImperativeHandle(ref, () => ({
+    startCamera,
+    capturePhoto
+  }), [startCamera, capturePhoto]);
 
   const retakePhoto = useCallback(() => {
     setCapturedPhoto(null);
@@ -199,7 +209,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
   }, [stopCamera, capturedPhoto, enhancedPhoto]);
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-full flex flex-col">
       {/* Main media area */}
       <div className="flex-1 flex items-center justify-center p-4">
         <motion.div
@@ -359,4 +369,8 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       </div>
     </div>
   );
-}
+});
+
+PhotoCapture.displayName = 'PhotoCapture';
+
+export default PhotoCapture;

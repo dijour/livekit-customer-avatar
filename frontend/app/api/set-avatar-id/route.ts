@@ -5,7 +5,7 @@ import { join } from "path";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { assetId } = body;
+    const { assetId, switchVoice } = body;
 
     if (!assetId) {
       return NextResponse.json(
@@ -19,6 +19,13 @@ export async function POST(request: NextRequest) {
     const assetIdFile = join(backendDir, "current_asset_id.txt");
     
     writeFileSync(assetIdFile, assetId);
+    
+    // If switchVoice is true, write voice state file to trigger voice switch
+    if (switchVoice) {
+      const voiceStateFile = join(backendDir, "voice_state.txt");
+      writeFileSync(voiceStateFile, "avatar");
+      console.log("Triggered voice switch to avatar mode");
+    }
     
     console.log(`Set asset ID: ${assetId}`);
 

@@ -3,7 +3,7 @@
 import { CloseIcon } from "@components/CloseIcon";
 import { NoAgentNotification } from "@components/NoAgentNotification";
 import TranscriptionView from "@components/TranscriptionView";
-import PhotoCapture from "@components/PhotoCapture";
+import PhotoCapture, { PhotoCaptureRef } from "@components/PhotoCapture";
 import { Button } from "@components/Button";
 import { MaskedMediaView } from "@components/MaskedMediaView";
 import { useAvatarSetup } from "../hooks/useAvatarSetup";
@@ -17,8 +17,8 @@ import {
   useVoiceAssistant,
 } from "@livekit/components-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Room, RoomEvent } from "livekit-client";
-import { useCallback, useContext, useEffect, useState } from "react";
+import { Room, RoomEvent, DataPacket_Kind, RemoteParticipant } from "livekit-client";
+import { useCallback, useContext, useEffect, useState, useRef } from "react";
 import type { ConnectionDetails } from "./api/connection-details/route";
 import type { RoomContextType } from "../types/room";
 
@@ -26,7 +26,9 @@ export default function Page() {
   const [room] = useState(new Room());
   const [isSimulation, setIsSimulation] = useState(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState(false);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const avatarSetup = useAvatarSetup();
+  const photoCaptureRef = useRef<PhotoCaptureRef | null>(null);
 
   const onConnectButtonClicked = useCallback(async () => {
     try {
@@ -60,7 +62,7 @@ export default function Page() {
           body: JSON.stringify({ assetId }),
         });
       } else {
-        // Use GET request if no asset ID
+        // Use GET request if no asset ID (Alexa mode)
         response = await fetch(url.toString());
       }
       
@@ -69,18 +71,109 @@ export default function Page() {
 
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
+      
+      // Register RPC methods for backend agent to call frontend functions
+      room.localParticipant.registerRpcMethod('startCamera', async () => {
+        console.log('🎥 Frontend RPC: startCamera called');
+        console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
+        console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
+        
+        if (photoCaptureRef.current?.startCamera) {
+          console.log('🎥 Calling photoCaptureRef.current.startCamera()');
+          photoCaptureRef.current.startCamera();
+          console.log('🎥 startCamera() called successfully');
+          return JSON.stringify("Camera started");
+        }
+        console.log('🎥 ERROR: Photo capture component not available');
+        return JSON.stringify("Camera component not available");
+      });
+      
+      room.localParticipant.registerRpcMethod('capturePhoto', async () => {
+        console.log('RPC: capturePhoto called');
+        if (photoCaptureRef.current?.capturePhoto) {
+          photoCaptureRef.current.capturePhoto();
+          return JSON.stringify("Photo captured");
+        }
+        return JSON.stringify("Photo capture component not available");
+      });
+      
+      room.localParticipant.registerRpcMethod('skipPhoto', async () => {
+        console.log('RPC: skipPhoto called');
+        avatarSetup.handleSkipPhoto();
+        return JSON.stringify("Photo skipped");
+      });
+      
     } catch (error) {
       console.error("Failed to connect:", error);
       setIsAutoConnecting(false);
     }
-  }, [room, avatarSetup.state.assetId]);
+  }, [room, avatarSetup.state.assetId, avatarSetup]);
 
-  // Auto-start conversation when avatar setup is ready
+  // Handle data messages from backend agent for frontend control
   useEffect(() => {
-    if (avatarSetup.canStartConversation && room.state === 'disconnected') {
+    const handleDataReceived = (
+      payload: Uint8Array, 
+      participant?: RemoteParticipant, 
+      kind?: DataPacket_Kind, 
+      topic?: string
+    ) => {
+      if (topic === "frontend_control") {
+        try {
+          const message = JSON.parse(new TextDecoder().decode(payload));
+          console.log("Received frontend control message:", message);
+          
+          switch (message.action) {
+            case "show_photo_capture":
+              // Force show photo capture UI
+              console.log("Triggering photo capture UI, current step:", avatarSetup.state.step);
+              avatarSetup.showPhotoCaptureAction();
+              setTimeout(() => {
+                console.log("Photo capture UI should now be visible, step:", avatarSetup.state.step);
+              }, 100);
+              break;
+              
+            case "start_camera":
+              // Start camera if photo capture component is available
+              if (photoCaptureRef.current?.startCamera) {
+                photoCaptureRef.current.startCamera();
+              }
+              break;
+              
+            case "capture_photo":
+              // Capture photo if photo capture component is available
+              if (photoCaptureRef.current?.capturePhoto) {
+                photoCaptureRef.current.capturePhoto();
+              }
+              break;
+              
+            case "skip_photo":
+              // Skip photo capture
+              avatarSetup.handleSkipPhoto();
+              break;
+          }
+        } catch (error) {
+          console.error("Error parsing frontend control message:", error);
+        }
+      }
+    };
+
+    room.on(RoomEvent.DataReceived, handleDataReceived);
+
+    return () => {
+      room.off(RoomEvent.DataReceived, handleDataReceived);
+    };
+  }, [room, avatarSetup, photoCaptureRef]);
+
+  // Auto-start conversation only after user interaction (to allow audio playback)
+  useEffect(() => {
+    if (hasUserInteracted && room.state === 'disconnected' && !isAutoConnecting) {
       onConnectButtonClicked();
     }
-  }, [avatarSetup.canStartConversation, room.state, onConnectButtonClicked]);
+  }, [hasUserInteracted, room.state, isAutoConnecting, onConnectButtonClicked]);
+
+  const handleStartExperience = useCallback(() => {
+    setHasUserInteracted(true);
+  }, []);
 
   useEffect(() => {
     room.on(RoomEvent.MediaDevicesError, onDeviceFailure);
@@ -90,27 +183,83 @@ export default function Page() {
     };
   }, [room]);
 
+  // Show start experience button if user hasn't interacted yet
+  if (!hasUserInteracted) {
+    return (
+      <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-screen bg-[#0E1A27] flex flex-col items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center max-w-md mx-auto px-6"
+        >
+          <motion.h1 
+            className="text-4xl font-bold text-white mb-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            Welcome to Your Avatar Experience
+          </motion.h1>
+          
+          <motion.p 
+            className="text-xl text-white/80 mb-8"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+          >
+            Alexa will guide you through creating your personalized avatar using voice commands
+          </motion.p>
+          
+          <motion.button
+            onClick={handleStartExperience}
+            className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white text-xl font-semibold rounded-full hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 shadow-lg"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.6 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            Start Voice Experience
+          </motion.button>
+          
+          <motion.p 
+            className="text-sm text-white/60 mt-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.8 }}
+          >
+            Click to enable audio and begin your guided avatar setup
+          </motion.p>
+        </motion.div>
+      </main>
+    );
+  }
+
   return (
     // anchor
     <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-screen bg-[#0E1A27] flex flex-col">
       <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
+
+        
+        {/* Show photo capture overlay when triggered by agent */}
         <AnimatePresence mode="wait">
-          {avatarSetup.showPhotoCapture ? (
+          {/* {avatarSetup.showPhotoCapture && ( */}
             <PhotoCapture 
               key="photo-capture"
+              ref={photoCaptureRef}
               onPhotoCapture={avatarSetup.handlePhotoCapture}
               onSkip={avatarSetup.handleSkipPhoto}
             />
-          ) : (
-            <SimpleVoiceAssistant 
-              key="voice-assistant"
-              onConnectButtonClicked={onConnectButtonClicked}
-              isSimulation={isSimulation}
-              setIsSimulation={setIsSimulation}
-              isAutoConnecting={isAutoConnecting}
-            />
-          )}
+          {/* )} */}
         </AnimatePresence>
+
+        {/* Always show voice assistant for agent connection */}
+        <SimpleVoiceAssistant 
+          onConnectButtonClicked={onConnectButtonClicked}
+          isSimulation={isSimulation}
+          setIsSimulation={setIsSimulation}
+          isAutoConnecting={isAutoConnecting}
+        />
 
         {/* Error notification */}
         <AnimatePresence>

@@ -14,10 +14,11 @@ type AvatarSetupAction =
   | { type: 'AVATAR_CREATED'; payload: string }
   | { type: 'AVATAR_CREATION_FAILED'; payload: string }
   | { type: 'PHOTO_SKIPPED' }
+  | { type: 'SHOW_PHOTO_CAPTURE' }
   | { type: 'RESET' };
 
 const initialState: AvatarSetupState = {
-  step: 'photo-capture',
+  step: 'ready', // Start in ready state, will be triggered to photo-capture by agent
   userPhoto: null,
   assetId: null,
   error: null,
@@ -58,6 +59,14 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
       return {
         ...state,
         step: 'skipped',
+        error: null,
+      };
+    
+    case 'SHOW_PHOTO_CAPTURE':
+      return {
+        ...state,
+        step: 'photo-capture',
+        error: null,
       };
     
     case 'RESET':
@@ -97,11 +106,14 @@ export function useAvatarSetup() {
       // Store asset ID locally and send to backend
       localStorage.setItem("hedraAssetId", result.assetId);
       
-      // Set asset ID for backend agent
+      // Set asset ID for backend agent and trigger voice switch
       await fetch("/api/set-avatar-id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId: result.assetId }),
+        body: JSON.stringify({ 
+          assetId: result.assetId,
+          switchVoice: true  // Trigger voice switch to avatar mode
+        }),
       });
 
       dispatch({ type: 'AVATAR_CREATED', payload: result.assetId });
@@ -122,7 +134,25 @@ export function useAvatarSetup() {
     dispatch({ type: 'PHOTO_SKIPPED' });
   }, []);
 
-  const reset = useCallback(() => {
+  const showPhotoCapture = useCallback(() => {
+    dispatch({ type: 'SHOW_PHOTO_CAPTURE' });
+  }, []);
+
+  const reset = useCallback(async () => {
+    // Reset voice state to Alexa mode
+    try {
+      await fetch("/api/reset-voice-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clearAssetId: true }),
+      });
+    } catch (error) {
+      console.error("Failed to reset voice state:", error);
+    }
+    
+    // Clear local storage
+    localStorage.removeItem("hedraAssetId");
+    
     dispatch({ type: 'RESET' });
   }, []);
 
@@ -130,6 +160,7 @@ export function useAvatarSetup() {
     state,
     handlePhotoCapture,
     handleSkipPhoto,
+    showPhotoCaptureAction: showPhotoCapture,
     reset,
     // Computed properties for easier UI logic
     showPhotoCapture: state.step === 'photo-capture',
