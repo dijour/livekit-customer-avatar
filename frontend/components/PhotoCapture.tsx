@@ -317,11 +317,11 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
                 onClick={enhancePhoto}
                 disabled={isEnhancing}
               >
-                {isEnhancing ? "Enhancing..." : "Enhance"}
+                {isEnhancing ? "Enhancing..." : "Add a hat"}
               </Button>
               <Button
                 key="use-original"
-                onClick={useOriginalPhoto}
+                onClick={confirmPhoto}
               >
                 Use Original
               </Button>

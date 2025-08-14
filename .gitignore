@@ -48,6 +48,9 @@ __pycache__/
 .Python
 build/
 develop-eggs/
+
+# Backend files
+backend/current_asset_id.txt
 dist/
 downloads/
 eggs/

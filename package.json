@@ -3,6 +3,7 @@
   "version": "0.1.6",
   "scripts": {
     "start-app": "cd frontend && pnpm install && pnpm dev",
-    "start-agent": "source venv/bin/activate && cd backend && pip install -r requirements.txt && python agent.py start"
+    "start-agent": "source venv/bin/activate && cd backend && pip install -r requirements.txt && python agent.py start",
+    "start-dual-agents": "source venv/bin/activate && cd backend && pip install -r requirements.txt && (python martha_agent.py start --port 8081 --agent-name martha-agent &) && (python snoop_agent.py start --port 8082 --agent-name snoop-agent &) && wait"
   }
 }

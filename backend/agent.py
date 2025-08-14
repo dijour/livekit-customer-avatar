@@ -6,6 +6,9 @@ from livekit.agents import AgentSession, Agent, RoomInputOptions, RoomOutputOpti
 from livekit.plugins import (
     hedra,
     openai,
+    deepgram,
+    elevenlabs,
+    silero,
     noise_cancellation,
 )
 
@@ -19,9 +22,23 @@ class Assistant(Agent):
 
 async def entrypoint(ctx: agents.JobContext):
     session = AgentSession(
-        llm=openai.realtime.RealtimeModel(
-            voice="ash"
-        )
+        stt=deepgram.STT(model="nova-3", language="multi"),
+        # llm=CustomLLM(
+        #     model_id=os.getenv("CUSTOM_LLM_MODEL_ID", "sandbox_04"),
+        #     temperature=0.7,
+        #     max_tokens=1000
+        # ),
+        llm=openai.LLM(model="gpt-4.1"),
+        # llm=aws.LLM(model="anthropic.claude-3-5-sonnet-20240620-v1:0"),
+        # llm=openai.realtime.RealtimeModel(voice="alloy"),
+        tts=elevenlabs.TTS(
+            voice_id="AOqTt8GleoAuFhMxHHu5",
+            model="eleven_flash_v2_5"
+        ),
+        vad=silero.VAD.load(),
+        # turn_detection=MultilingualModel()
+        turn_detection="stt"
+
     )
 
     # Get asset ID from file (set by frontend) or use default avatar ID

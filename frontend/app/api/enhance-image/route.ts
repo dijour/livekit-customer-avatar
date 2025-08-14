@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     console.log("File object created successfully");
 
     // Use gpt-image-1 to enhance the image
-    const enhancementPrompt = "Enhance this photo to create a professional, high-quality avatar. Make the background black and the person in studio lighting. The person should be directly facing the camera and centered within the frame.";
+    const enhancementPrompt = "Enhance this photo to create a professional, high-quality avatar. Add a funny hat to them. Do not change the person's appearance, sex, identity, eyes, age, nose, lips, hair, or any other physical feature. Do not change the background of the person. Add studio lighting. The person should be directly facing the camera and centered within the frame.";
 
     console.log("Making OpenAI API call...");
     const imageResponse = await openai.images.edit({
