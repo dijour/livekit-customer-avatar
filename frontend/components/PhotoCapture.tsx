@@ -2,6 +2,8 @@
 
 import React, { useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "./Button";
+import { MaskedMediaView } from "./MaskedMediaView";
 
 interface PhotoCaptureProps {
   onPhotoCapture: (photoBlob: Blob) => void;
@@ -18,6 +20,9 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
+  
+  // Feature flag: enable full workflow only if URL contains #modify
+  const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
 
   const startCamera = useCallback(async () => {
     try {
@@ -84,9 +89,15 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
         const photoUrl = URL.createObjectURL(blob);
         setCapturedPhoto(photoUrl);
         stopCamera();
+        
+        // If not in modify mode, automatically proceed to avatar creation
+        if (!isModifyMode) {
+          // Directly call onPhotoCapture with the blob to skip all confirmation screens
+          onPhotoCapture(blob);
+        }
       }
     }, "image/jpeg", 0.8);
-  }, [stopCamera]);
+  }, [stopCamera, isModifyMode, onPhotoCapture]);
 
   const retakePhoto = useCallback(() => {
     setCapturedPhoto(null);
@@ -188,178 +199,162 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
   }, [stopCamera, capturedPhoto, enhancedPhoto]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.3, ease: [0.09, 1.04, 0.245, 1.055] }}
-      className="flex flex-col items-center gap-6 h-full justify-center"
-    >
-      
-
-      <div className="relative">
-        {/* Video preview, captured photo, or enhanced photo */}
-        <div className="w-[400px] h-[400px] rounded-lg overflow-hidden bg-black">
-          {currentStep === 'confirm' && enhancedPhoto ? (
-            <div className="relative w-full h-full">
-              <img
-                src={enhancedPhoto}
-                alt="Enhanced photo"
-                className="w-full h-full object-cover"
-              />
-              
-            </div>
-          ) : capturedPhoto ? (
-            <div className="relative w-full h-full">
-              <img
-                src={capturedPhoto}
-                alt="Captured photo"
-                className="w-full h-full object-cover"
-              />
-              {isEnhancing && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <div className="text-white text-center">
-                    <p>Enhancing</p>
+    <div className="h-screen flex flex-col">
+      {/* Main media area */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          transition={{ duration: 0.3, ease: [0.09, 1.04, 0.245, 1.055] }}
+          className="relative"
+        >
+          {/* Photo preview area */}
+          <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
+          <div className="w-full h-full">
+            {currentStep === 'confirm' && enhancedPhoto ? (
+              <MaskedMediaView>
+                <img
+                  src={enhancedPhoto}
+                  alt="Enhanced photo"
+                  className="w-full h-full object-cover"
+                />
+              </MaskedMediaView>
+            ) : capturedPhoto ? (
+              <MaskedMediaView
+                overlay={isEnhancing ? (
+                  <div className="px-4 py-2">
+                    <div className="text-white text-center">
+                      <p>Enhancing</p>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ) : isStreaming ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              controls={false}
-              className="w-full h-full object-cover scale-x-[-1]"
-              onLoadedData={() => console.log("Video loaded")}
-              onError={(e) => console.error("Video error:", e)}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">
-              {/* <div className="text-center">
-                <div className="text-6xl mb-4">📷</div>
-                <p>Click "Start Camera" to begin</p>
-              </div> */}
-            </div>
-          )}
+                ) : undefined}
+              >
+                <img
+                  src={capturedPhoto}
+                  alt="Captured photo"
+                  className="w-full h-full object-cover"
+                />
+              </MaskedMediaView>
+            ) : isStreaming ? (
+              <MaskedMediaView>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  controls={false}
+                  className="w-full h-full object-cover scale-x-[-1]"
+                  onLoadedData={() => console.log("Video loaded")}
+                  onError={(e) => console.error("Video error:", e)}
+                />
+              </MaskedMediaView>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-gray-400">
+                {/* <div className="text-center">
+                  <div className="text-6xl mb-4">📷</div>
+                  <p>Click "Start Camera" to begin</p>
+                </div> */}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Hidden canvas for photo capture */}
-        <canvas ref={canvasRef} className="hidden" />
+          {/* Hidden canvas for photo capture */}
+          <canvas ref={canvasRef} className="hidden" />
+        </motion.div>
       </div>
 
-      {/* Error message */}
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-red-400 text-center bg-red-900/20 px-4 py-2 rounded-lg"
-        >
-          {error}
-        </motion.div>
-      )}
+      {/* Bottom control bar */}
+      <div className="p-6">
+        {/* Error message */}
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-red-400 text-center bg-red-900/20 px-4 py-2 rounded-lg mb-4"
+          >
+            {error}
+          </motion.div>
+        )}
 
-      {/* Controls */}
-      <div className="flex gap-4 flex-wrap justify-center">
+        {/* Controls */}
+        <div className="flex gap-4 flex-wrap justify-center">
         <AnimatePresence mode="wait">
           {!isStreaming && !capturedPhoto && (
-            <motion.button
+            <Button
               key="start"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               onClick={startCamera}
-              className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
             >
               Start Camera
-            </motion.button>
+            </Button>
           )}
 
           {isStreaming && (
-            <motion.button
+            <Button
               key="capture"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
               onClick={capturePhoto}
-              className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
             >
-              📸 Capture Photo
-            </motion.button>
+              Capture Photo
+            </Button>
           )}
 
-          {capturedPhoto && currentStep === 'capture' && (
+          {capturedPhoto && currentStep === 'capture' && isModifyMode && (
             <>
-              <motion.button
+              <Button
                 key="retake"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
                 onClick={retakePhoto}
-                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
               >
                 Retake
-              </motion.button>
-              <motion.button
+              </Button>
+              <Button
                 key="enhance"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
                 onClick={enhancePhoto}
                 disabled={isEnhancing}
-                className="px-6 py-3  bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%] disabled:opacity-50"
               >
                 {isEnhancing ? "Enhancing..." : "Enhance"}
-              </motion.button>
-              <motion.button
+              </Button>
+              <Button
                 key="use-original"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
                 onClick={useOriginalPhoto}
-                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
               >
                 Use Original
-              </motion.button>
+              </Button>
             </>
           )}
 
-          {currentStep === 'confirm' && (
+          {currentStep === 'confirm' && isModifyMode && (
             <>
-              <motion.button
+              <Button
                 key="retake-confirm"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
                 onClick={retakePhoto}
-                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
+                // variant="secondary"
               >
                 Retake
-              </motion.button>
-              <motion.button
+              </Button>
+              <Button
                 key="confirm-final"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
                 onClick={confirmPhoto}
-                className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
               >
                 Use This Photo
-              </motion.button>
+              </Button>
             </>
           )}
         </AnimatePresence>
 
-        <motion.button
+        {/* <motion.button
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           onClick={onSkip}
           className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
         >
           Skip Photo
-        </motion.button>
+        </motion.button> */}
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
