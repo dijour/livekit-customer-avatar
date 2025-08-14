@@ -151,32 +151,7 @@ function SimpleVoiceAssistant(props: {
   return (
     <div className="h-screen flex flex-col">
       <AnimatePresence mode="wait">
-        {agentState === "disconnected" ? (
-          <motion.div
-            key="disconnected"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3, ease: [0.09, 1.04, 0.245, 1.055] }}
-            className="flex-1 flex items-center justify-center"
-          >
-            {props.isAutoConnecting ? (
-              <div className="text-white text-center">
-                <div className="animate-spin w-8 h-8 border-2 border-white/20 border-t-white rounded-full mx-auto mb-4"></div>
-                <p className="text-lg">Connecting...</p>
-              </div>
-            ) : (
-              <Button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3, delay: 0.1 }}
-                onClick={() => props.onConnectButtonClicked()}
-              >
-                Start a conversation
-              </Button>
-            )}
-          </motion.div>
-        ) : (
+        {agentState !== "disconnected" && (
           <>
             {/* Main media area */}
             <div className="flex-1 flex flex-col items-center justify-center p-4">
@@ -189,7 +164,7 @@ function SimpleVoiceAssistant(props: {
                 className="flex flex-col items-center gap-6 h-full justify-center"
               >
                 <AgentVisualizer />
-                <div className="flex-1 w-full max-w-4xl">
+                <div className="h-16 w-full max-w-4xl">
                   <TranscriptionView />
                 </div>
               </motion.div>
@@ -214,7 +189,7 @@ function AgentVisualizer() {
   const { isSimulation } = useContext(RoomContext) as RoomContextType;
   if (isSimulation) {
     return (
-      <div className="h-[800px] w-[800px] rounded-lg overflow-hidden">
+      <div className="aspect-square rounded-lg overflow-hidden" style={{ width: 'min(60vh, 60vw)', height: 'min(60vh, 60vw)' }}>
         <MaskedMediaView>
           <div className="w-full h-full bg-gray-800 flex items-center justify-center">
             <img src="/images/martha.png" alt="AI Agent" className="w-full h-full object-cover" />
@@ -225,7 +200,7 @@ function AgentVisualizer() {
   }
   if (videoTrack) {
     return (
-      <div className="h-[800px] w-[800px] rounded-lg overflow-hidden">
+      <div className="aspect-square rounded-lg overflow-hidden" style={{ width: 'min(60vh, 60vw)', height: 'min(60vh, 60vw)' }}>
         <MaskedMediaView>
           <VideoTrack trackRef={videoTrack} />
         </MaskedMediaView>
@@ -233,7 +208,7 @@ function AgentVisualizer() {
     );
   }
   return (
-    <div className="h-[400px] w-full">
+    <div className="h-[300px] w-full">
       <BarVisualizer
         state={agentState}
         barCount={7}
@@ -250,22 +225,6 @@ function ControlBar(props: { onConnectButtonClicked: () => void }) {
 
   return (
     <div className="relative h-[60px]">
-      <AnimatePresence>
-        {agentState === "disconnected" && (
-          <Button
-            initial={{ opacity: 0, top: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, top: "-10px" }}
-            transition={{ duration: 1, ease: [0.09, 1.04, 0.245, 1.055] }}
-            className="uppercase absolute left-1/2 -translate-x-1/2"
-            // variant="secondary"
-            size="md"
-            onClick={() => props.onConnectButtonClicked()}
-          >
-            Start a conversation
-          </Button>
-        )}
-      </AnimatePresence>
       <AnimatePresence>
         {agentState !== "disconnected" && agentState !== "connecting" && (
           <motion.div

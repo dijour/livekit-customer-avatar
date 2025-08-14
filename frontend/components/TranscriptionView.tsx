@@ -22,7 +22,7 @@ export default function TranscriptionView() {
   }, [combinedTranscriptions]);
 
   return (
-    <div className="relative h-[200px] w-[512px] max-w-[90vw] mx-auto">
+    <div className="relative h-full w-[512px] max-w-[90vw] mx-auto">
       {/* Fade-out gradient mask */}
 
       {/* Scrollable content */}

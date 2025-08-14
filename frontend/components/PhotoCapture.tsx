@@ -237,18 +237,20 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
                 />
               </MaskedMediaView>
             ) : isStreaming ? (
-              <MaskedMediaView>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  controls={false}
-                  className="w-full h-full object-cover scale-x-[-1]"
-                  onLoadedData={() => console.log("Video loaded")}
-                  onError={(e) => console.error("Video error:", e)}
-                />
-              </MaskedMediaView>
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="w-[min(60vh,60vw)] h-[min(60vh,60vw)] rounded-full overflow-hidden">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    controls={false}
+                    className="w-full h-full object-cover scale-x-[-1]"
+                    onLoadedData={() => console.log("Video loaded")}
+                    onError={(e) => console.error("Video error:", e)}
+                  />
+                </div>
+              </div>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-400">
                 {/* <div className="text-center">
@@ -266,7 +268,7 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
       </div>
 
       {/* Bottom control bar */}
-      <div className="p-6">
+      <div className="pb-8">
         {/* Error message */}
         {error && (
           <motion.div
@@ -284,9 +286,9 @@ export default function PhotoCapture({ onPhotoCapture, onSkip }: PhotoCapturePro
           {!isStreaming && !capturedPhoto && (
             <Button
               key="start"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
+              // initial={{ opacity: 0, y: 10 }}
+              // animate={{ opacity: 1, y: 0 }}
+              // exit={{ opacity: 0, y: -10 }}
               onClick={startCamera}
             >
               Start Camera

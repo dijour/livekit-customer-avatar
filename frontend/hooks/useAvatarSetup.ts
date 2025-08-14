@@ -2,11 +2,10 @@ import { useCallback, useReducer } from 'react';
 
 // Types for the avatar setup flow
 export type AvatarSetupState = {
-  step: 'photo-capture' | 'creating-avatar' | 'ready' | 'skipped';
+  step: 'photo-capture' | 'ready' | 'skipped';
   userPhoto: Blob | null;
   assetId: string | null;
   error: string | null;
-  isLoading: boolean;
 };
 
 type AvatarSetupAction = 
@@ -22,7 +21,6 @@ const initialState: AvatarSetupState = {
   userPhoto: null,
   assetId: null,
   error: null,
-  isLoading: false,
 };
 
 function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction): AvatarSetupState {
@@ -31,15 +29,13 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
       return {
         ...state,
         userPhoto: action.payload,
-        step: 'creating-avatar',
-        isLoading: true,
+        step: 'ready',
         error: null,
       };
     
     case 'AVATAR_CREATION_STARTED':
       return {
         ...state,
-        isLoading: true,
         error: null,
       };
     
@@ -48,7 +44,6 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
         ...state,
         assetId: action.payload,
         step: 'ready',
-        isLoading: false,
         error: null,
       };
     
@@ -56,7 +51,6 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
       return {
         ...state,
         step: 'ready', // Continue anyway
-        isLoading: false,
         error: action.payload,
       };
     
@@ -64,7 +58,6 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
       return {
         ...state,
         step: 'skipped',
-        isLoading: false,
       };
     
     case 'RESET':
