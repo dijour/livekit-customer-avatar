@@ -12,6 +12,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         style={{ fontSize: '24px', lineHeight: '120%' }}
         className={`
+          min-w-[208px]
           h-[72px]
           px-[24px]
           bg-[#0074B8]/20 text-[#0ABEFF] 

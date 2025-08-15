@@ -1,20 +1,19 @@
 "use client";
 
-import { CloseIcon } from "@components/CloseIcon";
 import { NoAgentNotification } from "@components/NoAgentNotification";
 import TranscriptionView from "@components/TranscriptionView";
 import PhotoCapture, { PhotoCaptureRef } from "@components/PhotoCapture";
-import { Button } from "@components/Button";
+import { CaptionIcon, CaptionOffIcon, MicrophoneOnIcon, MicrophoneOffIcon, XmarkIcon } from '../components/icons';
+import { Button } from '../components/Button';
 import { MaskedMediaView } from "@components/MaskedMediaView";
 import { useAvatarSetup } from "../hooks/useAvatarSetup";
 import {
   BarVisualizer,
-  DisconnectButton,
   RoomAudioRenderer,
   RoomContext,
   VideoTrack,
-  VoiceAssistantControlBar,
   useVoiceAssistant,
+  useLocalParticipant,
 } from "@livekit/components-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Room, RoomEvent, DataPacket_Kind, RemoteParticipant } from "livekit-client";
@@ -192,35 +191,8 @@ export default function Page() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center max-w-md mx-auto px-6"
         >
-          <motion.h1 
-            className="text-4xl font-bold text-white mb-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-          >
-            Welcome to Your Avatar Experience
-          </motion.h1>
           
-          <motion.p 
-            className="text-xl text-white/80 mb-8"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-          >
-            Alexa will guide you through creating your personalized avatar using voice commands
-          </motion.p>
-          
-          <motion.button
-            onClick={handleStartExperience}
-            className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white text-xl font-semibold rounded-full hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 shadow-lg"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.6 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            Start Voice Experience
-          </motion.button>
+          <Button onClick={handleStartExperience}>Start</Button>
           
           <motion.p 
             className="text-sm text-white/60 mt-4"
@@ -243,14 +215,22 @@ export default function Page() {
         
         {/* Show photo capture overlay when triggered by agent */}
         <AnimatePresence mode="wait">
-          {/* {avatarSetup.showPhotoCapture && ( */}
+          {avatarSetup.showPhotoCapture && (
             <PhotoCapture 
               key="photo-capture"
               ref={photoCaptureRef}
               onPhotoCapture={avatarSetup.handlePhotoCapture}
               onSkip={avatarSetup.handleSkipPhoto}
+              onStateChange={(state) => {
+                // Update PhotoCaptureControls state when PhotoCapture state changes
+                if (photoCaptureRef.current) {
+                  // Find and update the PhotoCaptureControls component state
+                  const event = new CustomEvent('photoCaptureStateChange', { detail: state });
+                  window.dispatchEvent(event);
+                }
+              }}
             />
-          {/* )} */}
+          )}
         </AnimatePresence>
 
         {/* Always show voice assistant for agent connection */}
@@ -259,6 +239,7 @@ export default function Page() {
           isSimulation={isSimulation}
           setIsSimulation={setIsSimulation}
           isAutoConnecting={isAutoConnecting}
+          photoCaptureRef={photoCaptureRef}
         />
 
         {/* Error notification */}
@@ -282,46 +263,101 @@ export default function Page() {
   );
 }
 
-const DUMMY_CONVERSATION = [
-  { id: '1', role: 'user', text: 'Hello, can you help me with my project?' },
-  { id: '2', role: 'assistant', text: 'Of course! I\'d be happy to help. What kind of project are you working on?' },
-  { id: '3', role: 'user', text: 'I\'m building a React application and having trouble with state management.' },
-  { id: '4', role: 'assistant', text: 'I see. There are several approaches to state management in React. Could you tell me more about your specific requirements?' }
-];
-
 function SimpleVoiceAssistant(props: { 
   onConnectButtonClicked: () => void;
   isSimulation: boolean;
   setIsSimulation: (value: boolean) => void;
   isAutoConnecting: boolean;
+  photoCaptureRef: React.RefObject<PhotoCaptureRef | null>;
 }) {
   const { state: agentState } = useVoiceAssistant();
+  const { localParticipant } = useLocalParticipant();
+  const [isMuted, setIsMuted] = useState(false);
+  const [showCaptions, setShowCaptions] = useState(true);
+
+  const toggleMicrophone = useCallback(async () => {
+    if (localParticipant) {
+      const newMutedState = !isMuted;
+      await localParticipant.setMicrophoneEnabled(!newMutedState);
+      setIsMuted(newMutedState);
+    }
+  }, [localParticipant, isMuted]);
+
+  const toggleCaptions = useCallback(() => {
+    setShowCaptions(!showCaptions);
+  }, [showCaptions]);
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col relative">
       <AnimatePresence mode="wait">
         {agentState !== "disconnected" && (
           <>
-            {/* Main media area */}
-            <div className="flex-1 flex flex-col items-center justify-center p-4">
+            {/* Main content area - shows agent visualizer when connected */}
+            <div className="flex-1 flex items-center justify-center">
               <motion.div
                 key="connected"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3, ease: [0.09, 1.04, 0.245, 1.055] }}
-                className="flex flex-col items-center gap-6 h-full justify-center"
               >
                 <AgentVisualizer />
-                <div className="h-16 w-full max-w-4xl">
-                  <TranscriptionView />
-                </div>
               </motion.div>
             </div>
             
-            {/* Bottom control bar */}
-            <div className="p-4">
-              <ControlBar onConnectButtonClicked={props.onConnectButtonClicked} />
+            {/* Photo capture top control bar */}
+            <div className="fixed top-0 left-0 right-0 z-40">
+              <div className="relative px-[48px] py-[36px]">
+                {/* Left circular button */}
+                <div className="absolute left-[48px] top-[36px]">
+                  <button className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
+                    <XmarkIcon size={36} className="text-white" />
+                  </button>
+                </div>
+                
+                {/* Center status text - horizontally centered, vertically aligned with buttons */}
+                <div className="absolute left-1/2 top-[36px] -translate-x-1/2 h-[72px] flex items-center text-white text-[24px] whitespace-nowrap">
+                  <PhotoCaptureStatus />
+                </div>
+                
+                {/* Right buttons */}
+                <div className="absolute right-[48px] top-[36px] flex gap-4"> 
+                  <button 
+                    onClick={toggleCaptions}
+                    className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
+                  >
+                    {showCaptions ? (
+                      <CaptionOffIcon size={36} className="text-white" />
+                    ) : (
+                      <CaptionIcon size={36} className="text-white" />
+                    )}
+                  </button>
+                  <button 
+                    onClick={toggleMicrophone}
+                    className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
+                  >
+                    {isMuted ? (
+                      <MicrophoneOffIcon size={36} className="text-white" />
+                    ) : (
+                      <MicrophoneOnIcon size={36} className="text-white" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom toolbar with transcription and controls */}
+            <div className="fixed bottom-0 left-0 right-0 flex flex-row items-end gap-4 p-[48px]">
+              {/* Left column - Transcription */}
+              <div className="flex-1">
+                {showCaptions && (
+                  <TranscriptionView />
+                )}
+              </div>
+              {/* Right column - Photo capture controls */}
+              <div className="flex-shrink-0">
+                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} />
+              </div>
             </div>
             
             <RoomAudioRenderer />
@@ -338,7 +374,7 @@ function AgentVisualizer() {
   const { isSimulation } = useContext(RoomContext) as RoomContextType;
   if (isSimulation) {
     return (
-      <div className="aspect-square rounded-lg overflow-hidden" style={{ width: 'min(60vh, 60vw)', height: 'min(60vh, 60vw)' }}>
+      <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
         <MaskedMediaView>
           <div className="w-full h-full bg-gray-800 flex items-center justify-center">
             <img src="/images/martha.png" alt="AI Agent" className="w-full h-full object-cover" />
@@ -349,23 +385,205 @@ function AgentVisualizer() {
   }
   if (videoTrack) {
     return (
-      <div className="aspect-square rounded-lg overflow-hidden" style={{ width: 'min(60vh, 60vw)', height: 'min(60vh, 60vw)' }}>
+      <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
         <MaskedMediaView>
           <VideoTrack trackRef={videoTrack} />
         </MaskedMediaView>
       </div>
     );
   }
+  // No audio visualization - return null when no video
+  return null;
+}
+
+function PhotoCaptureStatus() {
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState(false);
+  const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
+  
+  if (currentStep === 'capture' && !capturedPhoto && !isStreaming) return 'Enable camera access to scan face';
+  if (currentStep === 'capture' && isStreaming) return 'Position your face in the circle';
+  if (currentStep === 'capture' && capturedPhoto) return 'Photo captured';
+  if (currentStep === 'enhance') return 'Enhancing photo...';
+  if (currentStep === 'confirm') return 'Ready to use';
+  return 'Ready to capture';
+}
+
+function PhotoCaptureControls({ photoCaptureRef }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null> }) {
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState(false);
+  const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const avatarSetup = useAvatarSetup();
+  
+  // Feature flag: enable full workflow only if URL contains #modify
+  const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
+
+  // Listen for state changes from PhotoCapture component
+  useEffect(() => {
+    const handleStateChange = (event: CustomEvent) => {
+      const state = event.detail;
+      setIsStreaming(state.isStreaming);
+      setCapturedPhoto(state.capturedPhoto);
+      setCurrentStep(state.currentStep);
+    };
+
+    window.addEventListener('photoCaptureStateChange', handleStateChange as EventListener);
+    return () => {
+      window.removeEventListener('photoCaptureStateChange', handleStateChange as EventListener);
+    };
+  }, []);
+
+  const handleStartCamera = useCallback(() => {
+    photoCaptureRef.current?.startCamera();
+    setIsStreaming(true);
+  }, [photoCaptureRef]);
+
+  const handleCapturePhoto = useCallback(() => {
+    photoCaptureRef.current?.capturePhoto();
+    setCapturedPhoto(true);
+    setIsStreaming(false);
+  }, [photoCaptureRef]);
+
+  const retakePhoto = useCallback(() => {
+    setCapturedPhoto(false);
+    setEnhancedPhoto(null);
+    setCurrentStep('capture');
+    handleStartCamera();
+  }, [handleStartCamera]);
+
+  const enhancePhoto = useCallback(async () => {
+    if (!canvasRef.current) return;
+
+    setIsEnhancing(true);
+    setError(null);
+
+    try {
+      // Convert canvas to blob for upload
+      const blob = await new Promise<Blob>((resolve) => {
+        canvasRef.current!.toBlob((blob) => {
+          if (blob) resolve(blob);
+        }, "image/jpeg", 0.8);
+      });
+
+      // Create form data for API call
+      const formData = new FormData();
+      formData.append("image", blob, "photo.jpg");
+
+      // Call OpenAI enhancement API
+      const response = await fetch("/api/enhance-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Enhancement failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success && result.enhancedImage) {
+        // Convert base64 to blob URL for display
+        const enhancedImageBlob = new Blob(
+          [Uint8Array.from(atob(result.enhancedImage), c => c.charCodeAt(0))],
+          { type: "image/png" }
+        );
+        const enhancedUrl = URL.createObjectURL(enhancedImageBlob);
+        setEnhancedPhoto(enhancedUrl);
+        setCurrentStep('confirm');
+      } else {
+        throw new Error("No enhanced image received");
+      }
+    } catch (error) {
+      console.error("Enhancement failed:", error);
+      setError("Failed to enhance image. Using original photo instead.");
+      // Fall back to original photo
+      setCurrentStep('confirm');
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, []);
+
+  const confirmPhoto = useCallback(() => {
+    if (enhancedPhoto) {
+      // Convert enhanced photo URL back to blob
+      fetch(enhancedPhoto)
+        .then(res => res.blob())
+        .then(blob => avatarSetup.handlePhotoCapture(blob))
+        .catch(() => {
+          // Fallback to canvas if enhanced photo fails
+          canvasRef.current?.toBlob((blob) => {
+            if (blob) avatarSetup.handlePhotoCapture(blob);
+          }, "image/jpeg", 0.8);
+        });
+    } else {
+      // Use original canvas
+      canvasRef.current?.toBlob((blob) => {
+        if (blob) avatarSetup.handlePhotoCapture(blob);
+      }, "image/jpeg", 0.8);
+    }
+  }, [avatarSetup, enhancedPhoto]);
+
   return (
-    <div className="h-[300px] w-full">
-      <BarVisualizer
-        state={agentState}
-        barCount={7}
-        trackRef={audioTrack}
-        className="agent-visualizer"
-        options={{ minHeight: 32 }}
-      />
-    </div>
+    <>
+      {/* Hidden canvas for photo capture */}
+      <canvas ref={canvasRef} className="hidden" />
+      
+      {/* Error message */}
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 text-red-400 text-center bg-red-900/20 px-4 py-2 rounded-lg"
+        >
+          {error}
+        </motion.div>
+      )}
+
+      <div className="flex gap-2 flex-wrap justify-center">
+        <AnimatePresence mode="wait">
+          {!isStreaming && !capturedPhoto && (
+            <Button key="start" onClick={handleStartCamera}>
+              Start Camera
+            </Button>
+          )}
+
+          {isStreaming && (
+            <Button key="capture" onClick={handleCapturePhoto}>
+              Take Photo
+            </Button>
+          )}
+
+          {capturedPhoto && currentStep === 'capture' && isModifyMode && (
+            <>
+              <Button key="retake" onClick={retakePhoto}>
+                Retake
+              </Button>
+              <Button key="enhance" disabled={isEnhancing} onClick={enhancePhoto}>
+                {isEnhancing ? "Enhancing..." : "Add a hat"}
+              </Button>
+              <Button key="use-original" onClick={confirmPhoto}>
+                Use Original
+              </Button>
+            </>
+          )}
+
+          {currentStep === 'confirm' && isModifyMode && (
+            <>
+              <Button key="retake-confirm" onClick={retakePhoto}>
+                Retake
+              </Button>
+              <Button key="confirm-final" onClick={confirmPhoto}>
+                Use This Photo
+              </Button>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+    </>
   );
 }
 
@@ -375,20 +593,6 @@ function ControlBar(props: { onConnectButtonClicked: () => void }) {
   return (
     <div className="relative h-[60px]">
       <AnimatePresence>
-        {agentState !== "disconnected" && agentState !== "connecting" && (
-          <motion.div
-            initial={{ opacity: 0, top: "10px" }}
-            animate={{ opacity: 1, top: 0 }}
-            exit={{ opacity: 0, top: "-10px" }}
-            transition={{ duration: 0.4, ease: [0.09, 1.04, 0.245, 1.055] }}
-            className="flex h-8 absolute left-1/2 -translate-x-1/2  justify-center"
-          >
-            <VoiceAssistantControlBar controls={{ leave: false }} />
-            <DisconnectButton>
-              <CloseIcon />
-            </DisconnectButton>
-          </motion.div>
-        )}
       </AnimatePresence>
     </div>
   );

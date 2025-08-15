@@ -8,6 +8,7 @@ import { MaskedMediaView } from "./MaskedMediaView";
 interface PhotoCaptureProps {
   onPhotoCapture: (photoBlob: Blob) => void;
   onSkip: () => void;
+  onStateChange?: (state: { isStreaming: boolean; capturedPhoto: boolean; currentStep: 'capture' | 'enhance' | 'confirm' }) => void;
 }
 
 export interface PhotoCaptureRef {
@@ -15,7 +16,7 @@ export interface PhotoCaptureRef {
   capturePhoto: () => void;
 }
 
-const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip }, ref) => {
+const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip, onStateChange }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -46,13 +47,14 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       
       setStream(mediaStream);
       setIsStreaming(true);
+      onStateChange?.({ isStreaming: true, capturedPhoto: !!capturedPhoto, currentStep });
       console.log('🎥 PhotoCapture: Camera started successfully');
     } catch (err) {
       console.error("🎥 PhotoCapture ERROR accessing camera:", err);
       setError("Failed to access camera. Please check permissions.");
       console.error("Camera access error:", err);
     }
-  }, []);
+  }, [capturedPhoto, currentStep, onStateChange]);
 
   // Use useEffect to set up video when stream and isStreaming change
   React.useEffect(() => {
@@ -93,6 +95,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         const photoUrl = URL.createObjectURL(blob);
         setCapturedPhoto(photoUrl);
         stopCamera();
+        onStateChange?.({ isStreaming: false, capturedPhoto: true, currentStep });
         
         // If not in modify mode, automatically proceed to avatar creation
         if (!isModifyMode) {
@@ -101,7 +104,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         }
       }
     }, "image/jpeg", 0.8);
-  }, [stopCamera, isModifyMode, onPhotoCapture]);
+  }, [stopCamera, isModifyMode, onPhotoCapture, onStateChange, currentStep]);
 
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
@@ -210,31 +213,6 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Top control bar */}
-      <div className="">
-        <div className="flex items-center justify-between px-[48px] py-[36px]">
-          {/* Left circular button */}
-          <button className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white">
-              <path d="m6 6 12 12"/>
-              <path d="m18 6-12 12"/>
-            </svg>
-          </button>
-          
-          {/* Center status text */}
-          <div className="text-white text-[24px] flex-1 text-center">
-            {currentStep === 'capture' && !capturedPhoto && !isStreaming && 'Enable camera access to scan face'}
-            {currentStep === 'capture' && isStreaming && 'Position your face in the circle'}
-            {currentStep === 'capture' && capturedPhoto && 'Photo captured'}
-            {currentStep === 'enhance' && 'Enhancing photo...'}
-            {currentStep === 'confirm' && 'Ready to use'}
-          </div>
-          
-          {/* Right spacer to balance layout */}
-          <div className="w-[72px]"></div>
-        </div>
-      </div>
-
       {/* Main media area */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0">
         <motion.div
@@ -302,96 +280,16 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         </motion.div>
       </div>
 
-      {/* Bottom control bar */}
-      <div className="pb-[24px] px-4 py-4">
-        {/* Error message */}
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-red-400 text-center bg-red-900/20 px-4 py-2 rounded-lg mb-4"
-          >
-            {error}
-          </motion.div>
-        )}
-
-        {/* Controls */}
-        <div className="flex gap-4 flex-wrap justify-center">
-        <AnimatePresence mode="wait">
-          {!isStreaming && !capturedPhoto && (
-            <Button
-              key="start"
-              // initial={{ opacity: 0, y: 10 }}
-              // animate={{ opacity: 1, y: 0 }}
-              // exit={{ opacity: 0, y: -10 }}
-              onClick={startCamera}
-            >
-              Enable camera
-            </Button>
-          )}
-
-          {isStreaming && (
-            <Button
-              key="capture"
-              onClick={capturePhoto}
-            >
-              Take a photo
-            </Button>
-          )}
-
-          {capturedPhoto && currentStep === 'capture' && isModifyMode && (
-            <>
-              <Button
-                key="retake"
-                onClick={retakePhoto}
-              >
-                Retake
-              </Button>
-              <Button
-                key="enhance"
-                onClick={enhancePhoto}
-                disabled={isEnhancing}
-              >
-                {isEnhancing ? "Enhancing..." : "Add a hat"}
-              </Button>
-              <Button
-                key="use-original"
-                onClick={confirmPhoto}
-              >
-                Use Original
-              </Button>
-            </>
-          )}
-
-          {currentStep === 'confirm' && isModifyMode && (
-            <>
-              <Button
-                key="retake-confirm"
-                onClick={retakePhoto}
-                // variant="secondary"
-              >
-                Retake
-              </Button>
-              <Button
-                key="confirm-final"
-                onClick={confirmPhoto}
-              >
-                Use This Photo
-              </Button>
-            </>
-          )}
-        </AnimatePresence>
-
-        {/* <motion.button
+      {/* Error message - moved to fixed position */}
+      {error && (
+        <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          onClick={onSkip}
-          className="px-6 py-3 bg-[#F5F5F5]/25 text-white rounded-full text-[28px] leading-[120%]"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 text-red-400 text-center bg-red-900/20 px-4 py-2 rounded-lg"
         >
-          Skip Photo
-        </motion.button> */}
-        </div>
-      </div>
+          {error}
+        </motion.div>
+      )}
     </div>
   );
 });
