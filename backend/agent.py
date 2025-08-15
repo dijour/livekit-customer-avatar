@@ -1,12 +1,30 @@
 import asyncio
 import os
+from datetime import datetime
+from typing import AsyncIterable, Optional
+import io
 from dotenv import load_dotenv
 
 from livekit import agents, rtc
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, WorkerType, cli, function_tool, RunContext, get_job_context
+from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, WorkerType, cli, function_tool, RunContext, get_job_context, stt, ModelSettings
+from livekit.agents.utils import combine_frames
 from livekit.plugins import openai, elevenlabs, deepgram, silero, hedra
 from livekit.agents import RoomOutputOptions, RoomInputOptions
 from livekit.plugins import noise_cancellation
+
+try:
+    from pydub import AudioSegment
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+    print("⚠️ WARNING: pydub not available. Voice recording will be disabled.")
+
+try:
+    from elevenlabs.client import ElevenLabs
+    ELEVENLABS_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_AVAILABLE = False
+    print("⚠️ WARNING: elevenlabs not available. Voice cloning will be disabled.")
 
 load_dotenv(".env.local")
 
@@ -15,6 +33,22 @@ class Assistant(Agent):
     def __init__(self, is_alexa_mode: bool = True, ctx=None, instructions=None):
         self.is_alexa_mode = is_alexa_mode
         self.ctx = ctx
+        
+        # Voice consolidation tracking
+        self.voice_accumulator = []  # List of audio segments for consolidation
+        self.accumulated_duration = 0.0  # Total duration accumulated so far
+        self.target_duration = 10.0  # Target 10 seconds for consolidated file
+        self.consolidation_count = 0  # Counter for consolidated files
+        
+        # Initialize ElevenLabs client
+        self.elevenlabs_client = None
+        if ELEVENLABS_AVAILABLE:
+            api_key = os.getenv("ELEVEN_API_KEY")
+            if api_key:
+                self.elevenlabs_client = ElevenLabs(api_key=api_key)
+                print("🎤 ElevenLabs client initialized for voice cloning")
+            else:
+                print("⚠️ WARNING: ELEVEN_API_KEY not found. Voice cloning disabled.")
         
         # Use provided instructions or generate default ones
         if not instructions:
@@ -129,6 +163,274 @@ You are no longer in setup mode - the avatar creation is complete and you're now
             print(f"❌ AGENT: Error in skip_photo: {str(e)}")
             return f"I had trouble skipping the photo: {str(e)}. Let me try a different approach."
 
+    async def save_recorded_audio(self, audio_frames: list, speech_id: str = None) -> str:
+        """Convert audio frames to MP3 and save locally for voice cloning"""
+        if not PYDUB_AVAILABLE or not audio_frames:
+            return None
+            
+        try:
+            # Create recordings directory if it doesn't exist
+            recordings_dir = os.path.join(os.path.dirname(__file__), "recordings")
+            os.makedirs(recordings_dir, exist_ok=True)
+            
+            # Generate timestamp-based filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            speech_suffix = f"_{speech_id}" if speech_id else ""
+            filename = f"user_speech_{timestamp}{speech_suffix}.mp3"
+            filepath = os.path.join(recordings_dir, filename)
+            
+            # Combine all audio frames into a single frame using LiveKit utility
+            try:
+                combined_frame = combine_frames(audio_frames)
+            except ValueError as e:
+                print(f"⚠️ Error combining audio frames: {e}")
+                return None
+            
+            # Get audio properties from combined frame
+            sample_rate = combined_frame.sample_rate
+            num_channels = combined_frame.num_channels
+            duration_seconds = combined_frame.duration
+            
+            print(f"🎤 AUDIO INFO: {duration_seconds:.1f}s, {sample_rate}Hz, {num_channels} channels, {len(audio_frames)} frames")
+            
+            # Get the audio data as bytes
+            audio_data = combined_frame.data.tobytes()
+            
+            if not audio_data:
+                print("⚠️ No audio data in combined frame")
+                return None
+                
+            print(f"🎤 PROCESSING: {len(audio_data)} bytes of audio data")
+                
+            # Create AudioSegment from raw audio data
+            # AudioFrame.data returns 16-bit signed integers
+            audio_segment = AudioSegment(
+                data=audio_data,
+                sample_width=2,  # 16-bit = 2 bytes
+                frame_rate=sample_rate,
+                channels=num_channels
+            )
+            
+            # Convert to mono if stereo for voice cloning
+            if num_channels > 1:
+                audio_segment = audio_segment.set_channels(1)
+                print(f"🎤 CONVERTED: Stereo to mono for voice cloning")
+            
+            # Export as MP3
+            audio_segment.export(filepath, format="mp3", bitrate="128k")
+            
+            duration = len(audio_segment) / 1000.0  # Duration in seconds
+            file_size = os.path.getsize(filepath)
+            
+            print(f"🎤 VOICE RECORDING: Saved {duration:.1f}s of audio to {filename} ({file_size} bytes)")
+            
+            # Add to voice consolidation system
+            consolidated = await self.add_to_voice_consolidation(audio_segment, duration)
+            if consolidated:
+                print(f"🎯 MILESTONE: Created ElevenLabs voice clone!")
+            
+            return filepath
+            
+        except Exception as e:
+            print(f"❌ ERROR saving audio: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def add_to_voice_consolidation(self, audio_segment, duration_seconds: float) -> bool:
+        """Add audio segment to consolidation buffer and check if ready to create consolidated file"""
+        try:
+            self.voice_accumulator.append(audio_segment)
+            self.accumulated_duration += duration_seconds
+            
+            print(f"🎤 CONSOLIDATION: Added {duration_seconds:.1f}s segment, total: {self.accumulated_duration:.1f}s / {self.target_duration}s")
+            
+            # Check if we have enough audio for consolidation
+            if self.accumulated_duration >= self.target_duration:
+                voice_id = await self.create_voice_clone_with_elevenlabs()
+                return voice_id is not None
+            
+            return False
+            
+        except Exception as e:
+            print(f"❌ ERROR in voice consolidation: {str(e)}")
+            return False
+
+    async def create_voice_clone_with_elevenlabs(self) -> str:
+        """Combine accumulated voice segments and send to ElevenLabs for voice cloning"""
+        if not PYDUB_AVAILABLE or not self.voice_accumulator or not self.elevenlabs_client:
+            return None
+            
+        try:
+            # Combine all accumulated audio segments
+            combined_audio = AudioSegment.empty()
+            for segment in self.voice_accumulator:
+                combined_audio += segment
+            
+            # Trim to exactly target duration if longer
+            if len(combined_audio) > self.target_duration * 1000:
+                combined_audio = combined_audio[:int(self.target_duration * 1000)]
+                print(f"🎤 CONSOLIDATION: Trimmed to exactly {self.target_duration}s")
+            
+            actual_duration = len(combined_audio) / 1000.0
+            segment_count = len(self.voice_accumulator)
+            
+            print(f"🎤 VOICE CLONING: Processing {actual_duration:.1f}s from {segment_count} segments")
+            
+            # Export to BytesIO for ElevenLabs
+            from io import BytesIO
+            audio_buffer = BytesIO()
+            combined_audio.export(audio_buffer, format="mp3", bitrate="192k")
+            audio_buffer.seek(0)  # Reset buffer position
+            
+            # Generate unique voice name
+            self.consolidation_count += 1
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            voice_name = f"User Voice Clone {self.consolidation_count:03d} ({timestamp})"
+            
+            print(f"🚀 ELEVENLABS: Creating voice clone '{voice_name}'...")
+            
+            # Create voice clone with ElevenLabs
+            voice = self.elevenlabs_client.voices.ivc.create(
+                name=voice_name,
+                files=[audio_buffer]
+            )
+            
+            print(f"🎉 VOICE CLONE CREATED!")
+            print(f"   🎯 Voice ID: {voice.voice_id}")
+            print(f"   📝 Name: {voice_name}")
+            print(f"   ⏱️  Duration: {actual_duration:.1f}s from {segment_count} segments")
+            print(f"   🎤 Ready to use for TTS!")
+            
+            # Reset accumulator for next consolidation
+            self.voice_accumulator = []
+            self.accumulated_duration = 0.0
+            
+            return voice.voice_id
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "missing_permissions" in error_msg and "voices_write" in error_msg:
+                print(f"❌ ELEVENLABS PERMISSION ERROR: Your API key needs 'voices_write' permission")
+                print(f"   💡 Solution: Upgrade to Starter plan or higher at elevenlabs.io")
+                print(f"   🔑 Or create a new API key with proper permissions")
+            elif "401" in error_msg:
+                print(f"❌ ELEVENLABS AUTH ERROR: Invalid or expired API key")
+                print(f"   🔑 Check your ELEVEN_API_KEY in .env.local")
+            else:
+                print(f"❌ ERROR creating ElevenLabs voice clone: {error_msg}")
+            
+            print(f"🔄 FALLBACK: Continuing without voice cloning...")
+            return None
+
+    async def create_instant_voice_clone(self) -> str:
+        """Create an instant voice clone if we have enough accumulated audio (even if less than 10s)"""
+        if not PYDUB_AVAILABLE or not self.voice_accumulator or not self.elevenlabs_client:
+            return None
+            
+        # Check if we have at least 3 seconds of audio for a basic clone
+        if self.accumulated_duration < 3.0:
+            print(f"🎤 INSTANT CLONE: Not enough audio ({self.accumulated_duration:.1f}s < 3.0s required)")
+            return None
+            
+        try:
+            # Combine all accumulated audio segments
+            combined_audio = AudioSegment.empty()
+            for segment in self.voice_accumulator:
+                combined_audio += segment
+            
+            actual_duration = len(combined_audio) / 1000.0
+            segment_count = len(self.voice_accumulator)
+            
+            print(f"🎤 INSTANT CLONE: Processing {actual_duration:.1f}s from {segment_count} segments")
+            
+            # Export to BytesIO for ElevenLabs
+            from io import BytesIO
+            audio_buffer = BytesIO()
+            combined_audio.export(audio_buffer, format="mp3", bitrate="192k")
+            audio_buffer.seek(0)  # Reset buffer position
+            
+            # Generate unique voice name for instant clone
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            voice_name = f"Instant User Clone ({timestamp})"
+            
+            print(f"🚀 ELEVENLABS: Creating instant voice clone '{voice_name}'...")
+            
+            # Create voice clone with ElevenLabs
+            voice = self.elevenlabs_client.voices.ivc.create(
+                name=voice_name,
+                files=[audio_buffer]
+            )
+            
+            print(f"🎉 INSTANT VOICE CLONE CREATED!")
+            print(f"   🎯 Voice ID: {voice.voice_id}")
+            print(f"   📝 Name: {voice_name}")
+            print(f"   ⏱️  Duration: {actual_duration:.1f}s from {segment_count} segments")
+            print(f"   🎭 Ready for surprise reveal!")
+            
+            # Don't reset accumulator - keep building for the full 10s clone later
+            
+            return voice.voice_id
+            
+        except Exception as e:
+            print(f"❌ ERROR creating instant voice clone: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def stt_node(
+        self, audio: AsyncIterable[rtc.AudioFrame], model_settings: ModelSettings
+    ) -> Optional[AsyncIterable[stt.SpeechEvent]]:
+        """Custom STT node that records user speech for voice cloning"""
+        
+        if not PYDUB_AVAILABLE:
+            # Fall back to default STT if pydub not available
+            async for event in Agent.default.stt_node(self, audio, model_settings):
+                yield event
+            return
+        
+        # Storage for current speech session
+        current_speech_frames = []
+        speech_started = False
+        speech_id = None
+        
+        async def filtered_and_recorded_audio():
+            nonlocal speech_started, speech_id, current_speech_frames
+            
+            async for frame in audio:
+                # Record frames during speech
+                if speech_started:
+                    current_speech_frames.append(frame)
+                
+                # Apply any additional filtering here if needed
+                # (BVC noise cancellation is already applied at room level)
+                yield frame
+        
+        # Process through default STT while recording
+        async for event in Agent.default.stt_node(self, filtered_and_recorded_audio(), model_settings):
+            
+            # Handle speech events for recording
+            if event.type == stt.SpeechEventType.START_OF_SPEECH:
+                speech_started = True
+                speech_id = datetime.now().strftime("%H%M%S")
+                current_speech_frames = []
+                print(f"🎤 VOICE RECORDING: Started recording speech session {speech_id}")
+                
+            elif event.type == stt.SpeechEventType.END_OF_SPEECH:
+                if speech_started and current_speech_frames:
+                    # Save the recorded audio
+                    saved_path = await self.save_recorded_audio(current_speech_frames, speech_id)
+                    if saved_path:
+                        print(f"🎤 VOICE RECORDING: Speech session {speech_id} saved to {os.path.basename(saved_path)}")
+                
+                # Reset for next speech session
+                speech_started = False
+                current_speech_frames = []
+                speech_id = None
+            
+            # Always yield the STT event to maintain normal functionality
+            yield event
+
 
 async def show_photo_capture_ui(ctx: agents.JobContext) -> str:
     """Show the photo capture interface"""
@@ -177,9 +479,20 @@ async def monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_f
                 
                 # Update TTS voice
                 try:
-                    # Create new TTS with avatar voice
+                    # Try to create instant voice clone from accumulated audio
+                    instant_voice_id = None
+                    if hasattr(session._agent, 'create_instant_voice_clone'):
+                        instant_voice_id = await session._agent.create_instant_voice_clone()
+                    
+                    # Use instant clone if available, otherwise fall back to default avatar voice
+                    voice_to_use = instant_voice_id if instant_voice_id else avatar_voice_id
+                    voice_type = "instant clone" if instant_voice_id else "default avatar"
+                    
+                    print(f"🎭 SURPRISE: Using {voice_type} voice (ID: {voice_to_use})")
+                    
+                    # Create new TTS with selected voice
                     new_tts = elevenlabs.TTS(
-                        voice_id=avatar_voice_id,
+                        voice_id=voice_to_use,
                         model="eleven_flash_v2_5"
                     )
                     

@@ -209,9 +209,34 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
   }, [stopCamera, capturedPhoto, enhancedPhoto]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-screen flex flex-col">
+      {/* Top control bar */}
+      <div className="">
+        <div className="flex items-center justify-between px-[48px] py-[36px]">
+          {/* Left circular button */}
+          <button className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white">
+              <path d="m6 6 12 12"/>
+              <path d="m18 6-12 12"/>
+            </svg>
+          </button>
+          
+          {/* Center status text */}
+          <div className="text-white text-[24px] flex-1 text-center">
+            {currentStep === 'capture' && !capturedPhoto && !isStreaming && 'Enable camera access to scan face'}
+            {currentStep === 'capture' && isStreaming && 'Position your face in the circle'}
+            {currentStep === 'capture' && capturedPhoto && 'Photo captured'}
+            {currentStep === 'enhance' && 'Enhancing photo...'}
+            {currentStep === 'confirm' && 'Ready to use'}
+          </div>
+          
+          {/* Right spacer to balance layout */}
+          <div className="w-[72px]"></div>
+        </div>
+      </div>
+
       {/* Main media area */}
-      <div className="flex-1 flex items-center justify-center p-4">
+      <div className="flex-1 flex items-center justify-center p-4 min-h-0">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -278,7 +303,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       </div>
 
       {/* Bottom control bar */}
-      <div className="pb-8">
+      <div className="pb-[24px] px-4 py-4">
         {/* Error message */}
         {error && (
           <motion.div
@@ -301,7 +326,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
               // exit={{ opacity: 0, y: -10 }}
               onClick={startCamera}
             >
-              Start Camera
+              Enable camera
             </Button>
           )}
 
@@ -310,7 +335,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
               key="capture"
               onClick={capturePhoto}
             >
-              Capture Photo
+              Take a photo
             </Button>
           )}
 
