@@ -26,6 +26,8 @@ livekit-api==1.0.5
 livekit-plugins-hedra==1.2.5
 livekit-plugins-openai==1.2.5
 livekit-plugins-silero==1.2.5
+livekit-plugins-elevenlabs==1.2
+livekit-plugins-deepgram==1.2
 livekit-protocol==1.0.5
 multidict==6.4.4
 nest-asyncio==1.6.0
