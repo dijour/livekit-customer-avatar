@@ -26,6 +26,9 @@ export default function Page() {
   const [isSimulation, setIsSimulation] = useState(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(false);
+  const [showAlexaTransition, setShowAlexaTransition] = useState(false);
+  const [showAvatarAppears, setShowAvatarAppears] = useState(false);
   const avatarSetup = useAvatarSetup();
   const photoCaptureRef = useRef<PhotoCaptureRef | null>(null);
 
@@ -72,7 +75,7 @@ export default function Page() {
       await room.localParticipant.setMicrophoneEnabled(true);
       
       // Register RPC methods for backend agent to call frontend functions
-      room.localParticipant.registerRpcMethod('startCamera', async () => {
+      room.registerRpcMethod('startCamera', async () => {
         console.log('🎥 Frontend RPC: startCamera called');
         console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
         console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
@@ -87,16 +90,18 @@ export default function Page() {
         return JSON.stringify("Camera component not available");
       });
       
-      room.localParticipant.registerRpcMethod('capturePhoto', async () => {
+      room.registerRpcMethod('capturePhoto', async () => {
         console.log('RPC: capturePhoto called');
         if (photoCaptureRef.current?.capturePhoto) {
           photoCaptureRef.current.capturePhoto();
+          // Show Alexa transition video during avatar generation
+          setShowAlexaTransition(true);
           return JSON.stringify("Photo captured");
         }
         return JSON.stringify("Photo capture component not available");
       });
       
-      room.localParticipant.registerRpcMethod('skipPhoto', async () => {
+      room.registerRpcMethod('skipPhoto', async () => {
         console.log('RPC: skipPhoto called');
         avatarSetup.handleSkipPhoto();
         return JSON.stringify("Photo skipped");
@@ -106,7 +111,22 @@ export default function Page() {
       console.error("Failed to connect:", error);
       setIsAutoConnecting(false);
     }
-  }, [room, avatarSetup.state.assetId, avatarSetup]);
+  }, [room, avatarSetup]);
+
+  // Monitor avatar creation and trigger phase transition
+  useEffect(() => {
+    console.log('🎭 Avatar state check:', { 
+      showAlexaTransition, 
+      assetId: avatarSetup.state.assetId, 
+      showAvatarAppears 
+    });
+    if (showAlexaTransition && avatarSetup.state.assetId && !showAvatarAppears) {
+      console.log('🎭 Avatar ready! Triggering avatar appears video');
+      setTimeout(() => {
+        setShowAvatarAppears(true);
+      }, 1000);
+    }
+  }, [showAlexaTransition, avatarSetup.state.assetId, showAvatarAppears]);
 
   // Handle data messages from backend agent for frontend control
   useEffect(() => {
@@ -128,6 +148,7 @@ export default function Page() {
               avatarSetup.showPhotoCaptureAction();
               setTimeout(() => {
                 console.log("Photo capture UI should now be visible, step:", avatarSetup.state.step);
+                setShowPhotoCaptureButton(true);
               }, 100);
               break;
               
@@ -173,6 +194,33 @@ export default function Page() {
   const handleStartExperience = useCallback(() => {
     setHasUserInteracted(true);
   }, []);
+
+  const handleResetExperience = useCallback(async () => {
+    // Disconnect from room
+    if (room.state === 'connected') {
+      await room.disconnect();
+    }
+    
+    // Reset all states
+    setHasUserInteracted(false);
+    setIsAutoConnecting(false);
+    setIsSimulation(false);
+    
+    // Reset avatar setup
+    avatarSetup.reset();
+    
+    // Clear localStorage
+    localStorage.removeItem("hedraAssetId");
+    
+    // Reset voice state on backend
+    try {
+      await fetch('/api/reset-voice-state', { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to reset voice state:', error);
+    }
+  }, [room, avatarSetup]);
+
+  // Hide Alexa transition when avatar is ready
 
   useEffect(() => {
     room.on(RoomEvent.MediaDevicesError, onDeviceFailure);
@@ -221,6 +269,10 @@ export default function Page() {
               ref={photoCaptureRef}
               onPhotoCapture={avatarSetup.handlePhotoCapture}
               onSkip={avatarSetup.handleSkipPhoto}
+              onShowAlexaTransition={() => {
+                console.log('🎬 PhotoCapture triggered Alexa transition');
+                setShowAlexaTransition(true);
+              }}
               onStateChange={(state) => {
                 // Update PhotoCaptureControls state when PhotoCapture state changes
                 if (photoCaptureRef.current) {
@@ -233,6 +285,61 @@ export default function Page() {
           )}
         </AnimatePresence>
 
+        {/* Alexa transition video overlay during avatar generation */}
+        <AnimatePresence>
+          {showAlexaTransition && (
+            <motion.div
+              key="alexa-transition"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5 }}
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
+            >
+              <div className="relative w-full h-full flex items-center justify-center">
+                {!showAvatarAppears ? (
+                  // Phase 1: Loop transition video until avatar is ready
+                  <video
+                    autoPlay
+                    loop
+                    muted
+                    className="w-auto h-auto max-w-full max-h-full object-contain"
+                    onLoadStart={() => console.log('🎬 Alexa transition video loading...')}
+                    onCanPlay={() => console.log('🎬 Alexa transition video can play')}
+                    onError={(e) => console.error('🎬 Alexa transition video error:', e)}
+                  >
+                    <source src="/videos/alexa_transition.mp4" type="video/mp4" />
+                  </video>
+                ) : (
+                  // Phase 2: Play avatar appears video once
+                  <video
+                    autoPlay
+                    muted
+                    className="w-auto h-auto max-w-full max-h-full object-contain"
+                    onEnded={() => {
+                      // Fade out the entire overlay after avatar appears video ends
+                      setTimeout(() => {
+                        setShowAlexaTransition(false);
+                        setShowAvatarAppears(false);
+                      }, 500);
+                    }}
+                  >
+                    <source src="/videos/avatar_appears.mp4" type="video/mp4" />
+                  </video>
+                )}
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white text-center">
+                  <p className="text-lg font-medium">
+                    {!showAvatarAppears ? "Creating your personalized avatar..." : "Your avatar is ready!"}
+                  </p>
+                  <p className="text-sm opacity-75 mt-2">
+                    {!showAvatarAppears ? "This will just take a moment" : "Welcome to your personalized experience"}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Always show voice assistant for agent connection */}
         <SimpleVoiceAssistant 
           onConnectButtonClicked={onConnectButtonClicked}
@@ -240,6 +347,8 @@ export default function Page() {
           setIsSimulation={setIsSimulation}
           isAutoConnecting={isAutoConnecting}
           photoCaptureRef={photoCaptureRef}
+          onResetExperience={handleResetExperience}
+          showPhotoCaptureButton={showPhotoCaptureButton}
         />
 
         {/* Error notification */}
@@ -269,6 +378,8 @@ function SimpleVoiceAssistant(props: {
   setIsSimulation: (value: boolean) => void;
   isAutoConnecting: boolean;
   photoCaptureRef: React.RefObject<PhotoCaptureRef | null>;
+  onResetExperience: () => Promise<void>;
+  showPhotoCaptureButton: boolean;
 }) {
   const { state: agentState } = useVoiceAssistant();
   const { localParticipant } = useLocalParticipant();
@@ -310,15 +421,18 @@ function SimpleVoiceAssistant(props: {
               <div className="relative px-[48px] py-[36px]">
                 {/* Left circular button */}
                 <div className="absolute left-[48px] top-[36px]">
-                  <button className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
+                  <button 
+                    onClick={props.onResetExperience}
+                    className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
+                  >
                     <XmarkIcon size={36} className="text-white" />
                   </button>
                 </div>
                 
                 {/* Center status text - horizontally centered, vertically aligned with buttons */}
-                <div className="absolute left-1/2 top-[36px] -translate-x-1/2 h-[72px] flex items-center text-white text-[24px] whitespace-nowrap">
+                {/* <div className="absolute left-1/2 top-[36px] -translate-x-1/2 h-[72px] flex items-center text-white text-[24px] whitespace-nowrap">
                   <PhotoCaptureStatus />
-                </div>
+                </div> */}
                 
                 {/* Right buttons */}
                 <div className="absolute right-[48px] top-[36px] flex gap-4"> 
@@ -356,7 +470,7 @@ function SimpleVoiceAssistant(props: {
               </div>
               {/* Right column - Photo capture controls */}
               <div className="flex-shrink-0">
-                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} />
+                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} />
               </div>
             </div>
             
@@ -409,7 +523,7 @@ function PhotoCaptureStatus() {
   return 'Ready to capture';
 }
 
-function PhotoCaptureControls({ photoCaptureRef }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null> }) {
+function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
@@ -438,8 +552,20 @@ function PhotoCaptureControls({ photoCaptureRef }: { photoCaptureRef: React.RefO
   }, []);
 
   const handleStartCamera = useCallback(() => {
-    photoCaptureRef.current?.startCamera();
-    setIsStreaming(true);
+    console.log('🎥 Frontend Button Clicked: startCamera called');
+    console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
+    console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
+    
+    if (photoCaptureRef.current?.startCamera) {
+      console.log('🎥 Calling photoCaptureRef.current.startCamera()');
+      photoCaptureRef.current.startCamera();
+      console.log('🎥 startCamera() called successfully');
+      return JSON.stringify("Camera started");
+    }
+    console.log('🎥 ERROR: Photo capture component not available');
+    return JSON.stringify("Camera component not available");
+    // photoCaptureRef.current?.startCamera();
+    // setIsStreaming(true);
   }, [photoCaptureRef]);
 
   const handleCapturePhoto = useCallback(() => {
@@ -545,7 +671,7 @@ function PhotoCaptureControls({ photoCaptureRef }: { photoCaptureRef: React.RefO
 
       <div className="flex gap-2 flex-wrap justify-center">
         <AnimatePresence mode="wait">
-          {!isStreaming && !capturedPhoto && (
+          {!isStreaming && !capturedPhoto && showPhotoCaptureButton && (
             <Button key="start" onClick={handleStartCamera}>
               Start Camera
             </Button>

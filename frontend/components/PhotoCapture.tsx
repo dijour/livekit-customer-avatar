@@ -9,6 +9,7 @@ interface PhotoCaptureProps {
   onPhotoCapture: (photoBlob: Blob) => void;
   onSkip: () => void;
   onStateChange?: (state: { isStreaming: boolean; capturedPhoto: boolean; currentStep: 'capture' | 'enhance' | 'confirm' }) => void;
+  onShowAlexaTransition?: () => void;
 }
 
 export interface PhotoCaptureRef {
@@ -16,7 +17,7 @@ export interface PhotoCaptureRef {
   capturePhoto: () => void;
 }
 
-const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip, onStateChange }, ref) => {
+const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip, onStateChange, onShowAlexaTransition }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -99,12 +100,14 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         
         // If not in modify mode, automatically proceed to avatar creation
         if (!isModifyMode) {
+          // Show Alexa transition overlay
+          onShowAlexaTransition?.();
           // Directly call onPhotoCapture with the blob to skip all confirmation screens
           onPhotoCapture(blob);
         }
       }
     }, "image/jpeg", 0.8);
-  }, [stopCamera, isModifyMode, onPhotoCapture, onStateChange, currentStep]);
+  }, [stopCamera, isModifyMode, onPhotoCapture, onStateChange, currentStep, onShowAlexaTransition]);
 
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
@@ -172,31 +175,10 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       setCurrentStep('confirm');
     } finally {
       setIsEnhancing(false);
+      stopCamera();
     }
-  }, []);
+  }, [stopCamera]);
 
-  const confirmPhoto = useCallback(() => {
-    // Use enhanced photo if available, otherwise use original
-    const photoToUse = enhancedPhoto || capturedPhoto;
-    
-    if (enhancedPhoto) {
-      // Convert enhanced photo URL back to blob
-      fetch(enhancedPhoto)
-        .then(res => res.blob())
-        .then(blob => onPhotoCapture(blob))
-        .catch(() => {
-          // Fallback to canvas if enhanced photo fails
-          canvasRef.current?.toBlob((blob) => {
-            if (blob) onPhotoCapture(blob);
-          }, "image/jpeg", 0.8);
-        });
-    } else {
-      // Use original canvas
-      canvasRef.current?.toBlob((blob) => {
-        if (blob) onPhotoCapture(blob);
-      }, "image/jpeg", 0.8);
-    }
-  }, [onPhotoCapture, enhancedPhoto, capturedPhoto]);
 
   // Cleanup on unmount
   React.useEffect(() => {

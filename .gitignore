@@ -52,6 +52,8 @@ develop-eggs/
 
 # Backend files
 backend/current_asset_id.txt
+backend/voice_state.txt
+backend/alexa_mode.txt
 dist/
 downloads/
 eggs/

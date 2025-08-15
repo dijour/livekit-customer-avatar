@@ -128,6 +128,16 @@ export function useAvatarSetup() {
   const handlePhotoCapture = useCallback(async (photoBlob: Blob) => {
     dispatch({ type: 'PHOTO_CAPTURED', payload: photoBlob });
     await createAvatar(photoBlob);
+
+    try {
+      await fetch('/api/switch-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'avatar' })
+      });
+    } catch (error) {
+      console.error('Failed to switch mode:', error);
+    }
   }, [createAvatar]);
 
   const handleSkipPhoto = useCallback(() => {

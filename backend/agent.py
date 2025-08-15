@@ -104,7 +104,7 @@ You are no longer in setup mode - the avatar creation is complete and you're now
                 response_timeout=10.0,
             )
             print(f"📹 AGENT: startCamera RPC call completed successfully")
-            return "Great! I'm starting your camera now. Once it's ready, you can say 'take photo' when you're ready to capture your picture."
+            return "Great! You can say 'take photo' when you're ready to capture your picture."
         except Exception as e:
             print(f"❌ AGENT: Error in start_camera: {str(e)}")
             return f"I had trouble starting the camera: {str(e)}. Please try again."
@@ -449,9 +449,27 @@ async def monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_f
     """Monitor for voice switching signals and update TTS accordingly"""
     print("Starting voice switch monitor...")
     last_voice_state = None
+    last_alexa_mode = True
+    alexa_mode_file = "alexa_mode.txt"
     
     while True:
         try:
+            # Check alexa mode file for frontend-triggered mode changes
+            current_alexa_mode = True
+            if os.path.exists(alexa_mode_file):
+                with open(alexa_mode_file, 'r') as f:
+                    mode_value = f.read().strip().lower()
+                    current_alexa_mode = mode_value == 'true'
+            
+            # If mode switched from Alexa to Avatar via frontend
+            if last_alexa_mode and not current_alexa_mode:
+                print("Frontend triggered switch to avatar mode")
+                # Set voice state to trigger avatar initialization
+                with open(voice_state_file, 'w') as f:
+                    f.write("avatar")
+            
+            last_alexa_mode = current_alexa_mode
+            
             # Check if voice state file indicates a switch to avatar mode
             current_voice_state = None
             if os.path.exists(voice_state_file):
@@ -499,10 +517,8 @@ async def monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_f
                     # Update session TTS
                     session._tts = new_tts
                     
-                    # Update assistant instructions
-                    session._agent.instructions = "You are the user's personalized AI avatar. You have just been created from their photo and are now ready to have conversations with them. Be friendly and engaging."
-                    
-                    # Generate handoff message
+                    # Generate handoff message with new instructions inline
+                    print("🎭 AVATAR: Switching to avatar personality")
                     await session.generate_reply(
                         instructions="Announce that you are now the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
                     )
@@ -530,6 +546,7 @@ async def entrypoint(ctx: agents.JobContext):
     # Check if we have an avatar (asset ID exists)
     asset_id_file = "current_asset_id.txt"
     voice_state_file = "voice_state.txt"
+    alexa_mode_file = "alexa_mode.txt"
     
     # Clear state files on startup to always start fresh with Alexa
     try:
@@ -539,11 +556,23 @@ async def entrypoint(ctx: agents.JobContext):
         if os.path.exists(asset_id_file):
             os.remove(asset_id_file)
             print("Cleared current_asset_id.txt for fresh start")
+        if os.path.exists(alexa_mode_file):
+            os.remove(alexa_mode_file)
+            print("Cleared alexa_mode.txt for fresh start")
     except Exception as e:
         print(f"Error clearing state files: {e}")
     
-    # Always start in Alexa mode for fresh sessions
+    # Check alexa mode from file, default to True
     is_alexa_mode = True
+    try:
+        if os.path.exists(alexa_mode_file):
+            with open(alexa_mode_file, 'r') as f:
+                mode_value = f.read().strip().lower()
+                is_alexa_mode = mode_value == 'true'
+                print(f"Read alexa_mode from file: {is_alexa_mode}")
+    except Exception as e:
+        print(f"Error reading alexa_mode file: {e}")
+        is_alexa_mode = True
     current_voice_id = ALEXA_VOICE_ID
     has_avatar = False
     
@@ -594,20 +623,20 @@ async def entrypoint(ctx: agents.JobContext):
     if is_alexa_mode:
         instructions = """You are Alexa, Amazon's voice assistant. You are helping a user create their personalized avatar by guiding them through a photo capture process.
 
-Your role:
-- Guide the user through taking a photo for their avatar
-- Be encouraging and helpful throughout the process
-- Speak naturally as Alexa would
+                        Your role:
+                        - Guide the user through taking a photo for their avatar
+                        - Be encouraging and helpful throughout the process
+                        - Speak naturally as Alexa would
 
-Start by greeting them and explaining that you've opened the photo capture interface. Tell them they can say "start camera" when they're ready to begin."""
+                        Start by greeting them and explaining that you've opened the photo capture interface. Tell them they can say "start camera" when they're ready to begin."""
     else:
         instructions = """You are the user's newly created personalized avatar. You've just been brought to life from their photo and are excited to meet them.
 
-Your role:
-- Greet them warmly as their avatar
-- Express excitement about being created from their photo
-- Ask how you can help them
-- Be friendly and engaging"""
+                        Your role:
+                        - Greet them warmly as their avatar
+                        - Express excitement about being created from their photo
+                        - Ask how you can help them
+                        - Be friendly and engaging"""
 
     # Create our custom agent with voice command handling
     custom_agent = Assistant(is_alexa_mode=is_alexa_mode, ctx=ctx, instructions=instructions)
@@ -662,7 +691,7 @@ Your role:
             # Show photo capture UI and greet user
             await show_photo_capture_ui(ctx)
             await session.generate_reply(
-                instructions="Immediately greet the user as Alexa. Say 'Hello! I'm Alexa, and I'm here to help you create your personalized avatar. I've opened the photo capture interface for you. When you're ready to take your photo, just say start camera and I'll guide you through the process.'"
+                instructions="Immediately greet the user as Alexa. Say 'Hey! You're about to create a digital clone of yourself. I'm Alexa, and I'm here to help you create your personalized avatar. When you're ready to take your photo, just say start camera and I'll guide you through the process.'"
             )
         else:
             print("Triggering avatar greeting...")
