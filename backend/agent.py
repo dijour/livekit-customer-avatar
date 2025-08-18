@@ -74,6 +74,7 @@ Be proactive in guiding them through each step. Start by explaining the process 
 
 Your role:
 - Greet them warmly as their avatar
+- Your name is not Alexa. Your name is the user's name.
 - Express excitement about being created from their photo
 - Ask how you can help them
 - Be friendly and engaging
@@ -540,7 +541,7 @@ async def monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_f
 
 async def entrypoint(ctx: agents.JobContext):
     # Voice configuration
-    ALEXA_VOICE_ID = "AOqTt8GleoAuFhMxHHu5"  # Alexa voice for setup
+    ALEXA_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice for setup (more reliable)
     AVATAR_VOICE_ID = "UtaLMHFQy5D4jbOLM0tN"  # Custom avatar voice
     
     # Check if we have an avatar (asset ID exists)
@@ -690,9 +691,20 @@ async def entrypoint(ctx: agents.JobContext):
             print("Triggering Alexa greeting and photo capture UI...")
             # Show photo capture UI and greet user
             await show_photo_capture_ui(ctx)
-            await session.generate_reply(
-                instructions="Immediately greet the user as Alexa. Say 'Hey! You're about to create a digital clone of yourself. I'm Alexa, and I'm here to help you create your personalized avatar. When you're ready to take your photo, just say start camera and I'll guide you through the process.'"
-            )
+            try:
+                await session.generate_reply(
+                    instructions="Immediately greet the user as Alexa. Say 'Hey! You're about to create a digital clone of yourself. I'm Alexa, and I'm here to help you create your personalized avatar. Why don't you start by telling me a little bit about yourself? Then, when you're ready to take your photo, just say start camera and I'll guide you through the process.'"
+                )
+            except Exception as e:
+                print(f"❌ TTS Error during Alexa greeting: {e}")
+                # Try a shorter, simpler greeting as fallback
+                try:
+                    await session.generate_reply(
+                        instructions="Say: 'Hi! I'm here to help you create your avatar. Say 'start camera' when ready.'"
+                    )
+                except Exception as e2:
+                    print(f"❌ TTS Error during fallback greeting: {e2}")
+                    print("⚠️ TTS service appears to be unavailable")
         else:
             print("Triggering avatar greeting...")
             await session.generate_reply(
