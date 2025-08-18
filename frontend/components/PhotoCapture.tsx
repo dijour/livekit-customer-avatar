@@ -15,6 +15,9 @@ interface PhotoCaptureProps {
 export interface PhotoCaptureRef {
   startCamera: () => void;
   capturePhoto: () => void;
+  enhancePhoto: () => void;
+  useOriginalPhoto: () => void;
+  retakePhoto: () => void;
 }
 
 const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip, onStateChange, onShowAlexaTransition }, ref) => {
@@ -109,13 +112,8 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
     }, "image/jpeg", 0.8);
   }, [stopCamera, isModifyMode, onPhotoCapture, onStateChange, currentStep, onShowAlexaTransition]);
 
-  // Expose methods to parent component via ref
-  useImperativeHandle(ref, () => ({
-    startCamera,
-    capturePhoto
-  }), [startCamera, capturePhoto]);
-
   const retakePhoto = useCallback(() => {
+    console.log("📸 PhotoCapture: retakePhoto called");
     setCapturedPhoto(null);
     setEnhancedPhoto(null);
     setCurrentStep('capture');
@@ -123,11 +121,16 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
   }, [startCamera]);
 
   const useOriginalPhoto = useCallback(() => {
+    console.log("📸 PhotoCapture: useOriginalPhoto called");
     setCurrentStep('confirm');
   }, []);
 
   const enhancePhoto = useCallback(async () => {
-    if (!canvasRef.current) return;
+    console.log("🎨 PhotoCapture: enhancePhoto called");
+    if (!canvasRef.current) {
+      console.log("🎨 PhotoCapture: No canvas available");
+      return;
+    }
 
     setIsEnhancing(true);
     setError(null);
@@ -136,9 +139,17 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       // Convert canvas to blob for upload
       const blob = await new Promise<Blob>((resolve) => {
         canvasRef.current!.toBlob((blob) => {
-          if (blob) resolve(blob);
+          if (blob) {
+            console.log("🎨 PhotoCapture: Blob created for enhancement:", {
+              size: blob.size,
+              type: blob.type
+            });
+            resolve(blob);
+          }
         }, "image/jpeg", 0.8);
       });
+
+      console.log("🎨 PhotoCapture: Sending blob to API, size:", blob.size);
 
       // Create form data for API call
       const formData = new FormData();
@@ -165,11 +176,12 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         const enhancedUrl = URL.createObjectURL(enhancedImageBlob);
         setEnhancedPhoto(enhancedUrl);
         setCurrentStep('confirm');
+        console.log("🎨 PhotoCapture: Enhancement completed successfully");
       } else {
         throw new Error("No enhanced image received");
       }
     } catch (error) {
-      console.error("Enhancement failed:", error);
+      console.error("🎨 PhotoCapture: Enhancement failed:", error);
       setError("Failed to enhance image. Using original photo instead.");
       // Fall back to original photo
       setCurrentStep('confirm');
@@ -179,6 +191,14 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
     }
   }, [stopCamera]);
 
+  // Expose methods to parent component via ref
+  useImperativeHandle(ref, () => ({
+    startCamera,
+    capturePhoto,
+    enhancePhoto,
+    useOriginalPhoto,
+    retakePhoto
+  }), [startCamera, capturePhoto, enhancePhoto, useOriginalPhoto, retakePhoto]);
 
   // Cleanup on unmount
   React.useEffect(() => {

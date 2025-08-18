@@ -528,9 +528,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
-  const [isEnhancing, setIsEnhancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const avatarSetup = useAvatarSetup();
   
   // Feature flag: enable full workflow only if URL contains #modify
@@ -575,89 +573,34 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
   }, [photoCaptureRef]);
 
   const retakePhoto = useCallback(() => {
-    setCapturedPhoto(false);
-    setEnhancedPhoto(null);
-    setCurrentStep('capture');
-    handleStartCamera();
-  }, [handleStartCamera]);
-
-  const enhancePhoto = useCallback(async () => {
-    if (!canvasRef.current) return;
-
-    setIsEnhancing(true);
-    setError(null);
-
-    try {
-      // Convert canvas to blob for upload
-      const blob = await new Promise<Blob>((resolve) => {
-        canvasRef.current!.toBlob((blob) => {
-          if (blob) resolve(blob);
-        }, "image/jpeg", 0.8);
-      });
-
-      // Create form data for API call
-      const formData = new FormData();
-      formData.append("image", blob, "photo.jpg");
-
-      // Call OpenAI enhancement API
-      const response = await fetch("/api/enhance-image", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Enhancement failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.success && result.enhancedImage) {
-        // Convert base64 to blob URL for display
-        const enhancedImageBlob = new Blob(
-          [Uint8Array.from(atob(result.enhancedImage), c => c.charCodeAt(0))],
-          { type: "image/png" }
-        );
-        const enhancedUrl = URL.createObjectURL(enhancedImageBlob);
-        setEnhancedPhoto(enhancedUrl);
-        setCurrentStep('confirm');
-      } else {
-        throw new Error("No enhanced image received");
-      }
-    } catch (error) {
-      console.error("Enhancement failed:", error);
-      setError("Failed to enhance image. Using original photo instead.");
-      // Fall back to original photo
-      setCurrentStep('confirm');
-    } finally {
-      setIsEnhancing(false);
-    }
-  }, []);
-
-  const confirmPhoto = useCallback(() => {
-    if (enhancedPhoto) {
-      // Convert enhanced photo URL back to blob
-      fetch(enhancedPhoto)
-        .then(res => res.blob())
-        .then(blob => avatarSetup.handlePhotoCapture(blob))
-        .catch(() => {
-          // Fallback to canvas if enhanced photo fails
-          canvasRef.current?.toBlob((blob) => {
-            if (blob) avatarSetup.handlePhotoCapture(blob);
-          }, "image/jpeg", 0.8);
-        });
+    console.log("📸 PhotoCaptureControls: Calling PhotoCapture.retakePhoto");
+    if (photoCaptureRef.current?.retakePhoto) {
+      photoCaptureRef.current.retakePhoto();
     } else {
-      // Use original canvas
-      canvasRef.current?.toBlob((blob) => {
-        if (blob) avatarSetup.handlePhotoCapture(blob);
-      }, "image/jpeg", 0.8);
+      console.log("📸 ERROR: PhotoCapture retakePhoto method not available");
     }
-  }, [avatarSetup, enhancedPhoto]);
+  }, [photoCaptureRef]);
+
+  const enhancePhoto = useCallback(() => {
+    console.log("🎨 PhotoCaptureControls: Calling PhotoCapture.enhancePhoto");
+    if (photoCaptureRef.current?.enhancePhoto) {
+      photoCaptureRef.current.enhancePhoto();
+    } else {
+      console.log("🎨 ERROR: PhotoCapture enhancePhoto method not available");
+    }
+  }, [photoCaptureRef]);
+
+  const useOriginalPhoto = useCallback(() => {
+    console.log("📸 PhotoCaptureControls: Calling PhotoCapture.useOriginalPhoto");
+    if (photoCaptureRef.current?.useOriginalPhoto) {
+      photoCaptureRef.current.useOriginalPhoto();
+    } else {
+      console.log("📸 ERROR: PhotoCapture useOriginalPhoto method not available");
+    }
+  }, [photoCaptureRef]);
 
   return (
     <>
-      {/* Hidden canvas for photo capture */}
-      <canvas ref={canvasRef} className="hidden" />
-      
       {/* Error message */}
       {error && (
         <motion.div
@@ -688,10 +631,10 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
               <Button key="retake" onClick={retakePhoto}>
                 Retake
               </Button>
-              <Button key="enhance" disabled={isEnhancing} onClick={enhancePhoto}>
-                {isEnhancing ? "Enhancing..." : "Add a hat"}
+              <Button key="enhance" onClick={enhancePhoto}>
+                Add a hat
               </Button>
-              <Button key="use-original" onClick={confirmPhoto}>
+              <Button key="use-original" onClick={useOriginalPhoto}>
                 Use Original
               </Button>
             </>
@@ -702,7 +645,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
               <Button key="retake-confirm" onClick={retakePhoto}>
                 Retake
               </Button>
-              <Button key="confirm-final" onClick={confirmPhoto}>
+              <Button key="confirm-final" onClick={useOriginalPhoto}>
                 Use This Photo
               </Button>
             </>

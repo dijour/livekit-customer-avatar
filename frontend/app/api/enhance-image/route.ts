@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
+import path from 'path';
+import fs from 'fs';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -43,8 +45,27 @@ export async function POST(request: NextRequest) {
     });
     console.log("File object created successfully");
 
+    // Debug: Save the image being sent to OpenAI
+    const debugDir = path.join(process.cwd(), "debug");
+    if (!fs.existsSync(debugDir)) {
+      fs.mkdirSync(debugDir, { recursive: true });
+    }
+    const debugImagePath = path.join(debugDir, `input-${Date.now()}.jpg`);
+    fs.writeFileSync(debugImagePath, buffer);
+    console.log("Debug: Saved input image to:", debugImagePath);
+    
+    // Log image properties
+    console.log("=== Image Debug Info ===");
+    console.log("Buffer size:", buffer.length, "bytes");
+    console.log("Buffer first 20 bytes:", buffer.subarray(0, 20));
+    console.log("Is JPEG header:", buffer.subarray(0, 3).toString('hex') === 'ffd8ff');
+    console.log("File object size:", imageFile.size);
+    console.log("File object name:", imageFile.name);
+    console.log("File object type:", imageFile.type);
+    console.log("======================");
+
     // Use gpt-image-1 to enhance the image
-    const enhancementPrompt = "Enhance this photo to create a professional, high-quality avatar. Add a funny hat to them. Do not change the person's appearance, sex, identity, eyes, age, nose, lips, hair, or any other physical feature. Do not change the background of the person. Add studio lighting. The person should be directly facing the camera and centered within the frame.";
+    const enhancementPrompt = "Add a funny hat to this person.";
 
     console.log("Making OpenAI API call...");
     const imageResponse = await openai.images.edit({
@@ -55,7 +76,7 @@ export async function POST(request: NextRequest) {
     });
     console.log("OpenAI API call completed");
     console.log("Response data length:", imageResponse.data?.length || 0);
-    console.log("Response structure:", JSON.stringify(imageResponse.data?.[0] || {}, null, 2));
+    // console.log("Response structure:", JSON.stringify(imageResponse.data?.[0] || {}, null, 2));
 
     if (!imageResponse.data || imageResponse.data.length === 0) {
       console.log("Error: No image data received from OpenAI");
