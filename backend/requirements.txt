@@ -12,7 +12,6 @@ click==8.2.1
 colorama==0.4.6
 distro==1.9.0
 docstring_parser==0.16
-dotenv==0.9.9
 eval_type_backport==0.2.2
 frozenlist==1.7.0
 h11==0.16.0
