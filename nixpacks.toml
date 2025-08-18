@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ['python311', 'pip']
+
+[phases.install]
+cmds = [
+    'cd backend',
+    'pip install -r requirements.txt'
+]
+
+[start]
+cmd = 'cd backend && python agent.py start'
