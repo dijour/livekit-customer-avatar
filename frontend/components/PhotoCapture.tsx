@@ -35,11 +35,44 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
 
   const startCamera = useCallback(async () => {
     console.log('🎥 PhotoCapture: startCamera() called');
+    console.log('🎥 Environment info:', {
+      isSecureContext: window.isSecureContext,
+      protocol: window.location.protocol,
+      hostname: window.location.hostname,
+      userAgent: navigator.userAgent,
+      hasMediaDevices: !!navigator.mediaDevices,
+      hasGetUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+    });
+    
     try {
       setError(null);
+      
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API not supported in this browser');
+      }
+      
+      // Check for permissions API support and current state
+      if (navigator.permissions) {
+        try {
+          const permissionStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+          console.log('🎥 Camera permission status:', permissionStatus.state);
+          
+          if (permissionStatus.state === 'denied') {
+            throw new Error('Camera permission has been denied. Please enable camera access in your browser settings.');
+          }
+        } catch (permError) {
+          console.log('🎥 Permission API not fully supported:', permError);
+        }
+      }
+      
       console.log('🎥 PhotoCapture: Requesting camera access...');
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { 
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: false,
       });
       
@@ -52,10 +85,35 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       setIsStreaming(true);
       onStateChange?.({ isStreaming: true, capturedPhoto: !!capturedPhoto, currentStep });
       console.log('🎥 PhotoCapture: Camera started successfully');
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("🎥 PhotoCapture ERROR accessing camera:", err);
-      setError("Failed to access camera. Please check permissions.");
-      console.error("Camera access error:", err);
+      
+      let errorMessage = "Failed to access camera. ";
+      
+      // Type guard to check if err is a DOMException or Error
+      const error = err as Error | DOMException;
+      
+      if (error.name === 'NotAllowedError') {
+        errorMessage += "Please allow camera permissions and try again.";
+      } else if (error.name === 'NotFoundError') {
+        errorMessage += "No camera found on this device.";
+      } else if (error.name === 'NotSupportedError') {
+        errorMessage += "Camera not supported in this browser.";
+      } else if (error.name === 'NotReadableError') {
+        errorMessage += "Camera is being used by another application.";
+      } else if (error.message && error.message.includes('HTTPS')) {
+        errorMessage += "HTTPS is required for camera access in production.";
+      } else {
+        errorMessage += "Please check your browser settings and permissions.";
+      }
+      
+      setError(errorMessage);
+      console.error("Camera access error details:", {
+        name: error.name,
+        message: error.message,
+        isSecureContext: window.isSecureContext,
+        protocol: window.location.protocol
+      });
     }
   }, [capturedPhoto, currentStep, onStateChange]);
 
