@@ -303,6 +303,10 @@ You are no longer in setup mode - the avatar creation is complete and you're now
             print(f"   ⏱️  Duration: {actual_duration:.1f}s from {segment_count} segments")
             print(f"   🎤 Ready to use for TTS!")
             
+            # Store the custom voice ID for later use
+            with open("custom_voice_id.txt", "w") as f:
+                f.write(voice.voice_id)
+            
             # Reset accumulator for next consolidation
             self.voice_accumulator = []
             self.accumulated_duration = 0.0
@@ -446,7 +450,7 @@ async def show_photo_capture_ui(ctx: agents.JobContext) -> str:
         return f"Failed to show photo capture UI: {str(e)}"
 
 
-async def check_avatar_state_periodically(session, avatar_ref, avatar_voice_id, ctx):
+async def check_avatar_state_periodically(session, avatar_ref, default_avatar_voice_id, ctx):
     """Periodically check for avatar state changes from API"""
     import requests
     last_state = None
@@ -477,9 +481,22 @@ async def check_avatar_state_periodically(session, avatar_ref, avatar_voice_id, 
                             
                             # Update TTS voice
                             try:
-                                # Use avatar voice
+                                # Check for custom voice ID first, fallback to default
+                                custom_voice_id = None
+                                try:
+                                    with open("custom_voice_id.txt", "r") as f:
+                                        custom_voice_id = f.read().strip()
+                                        if custom_voice_id:
+                                            print(f"🎯 Using custom voice ID: {custom_voice_id}")
+                                except FileNotFoundError:
+                                    print("🎯 No custom voice ID found, using default")
+                                
+                                voice_id_to_use = custom_voice_id if custom_voice_id else default_avatar_voice_id
+                                print(f"🎭 Switching to voice ID: {voice_id_to_use}")
+                                
+                                # Use avatar voice (custom or default)
                                 new_tts = elevenlabs.TTS(
-                                    voice_id=avatar_voice_id,
+                                    voice_id=voice_id_to_use,
                                     model="eleven_flash_v2_5"
                                 )
                                 
