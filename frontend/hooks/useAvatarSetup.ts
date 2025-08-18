@@ -112,7 +112,7 @@ export function useAvatarSetup() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           assetId: result.assetId,
-          switchVoice: true  // Trigger voice switch to avatar mode
+          switchVoice: true
         }),
       });
 
@@ -154,7 +154,9 @@ export function useAvatarSetup() {
       await fetch("/api/reset-voice-state", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clearAssetId: true }),
+        body: JSON.stringify({ 
+          clearAssetId: true
+        }),
       });
     } catch (error) {
       console.error("Failed to reset voice state:", error);

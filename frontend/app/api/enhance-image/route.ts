@@ -30,10 +30,9 @@ export async function POST(request: NextRequest) {
       type: uploadedFile.type
     });
 
-    // Convert the image file to base64
+    // Convert the image file to buffer
     const bytes = await uploadedFile.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const base64Image = buffer.toString("base64");
 
     console.log("Image converted to buffer, size:", buffer.length);
     console.log("Enhancing image with OpenAI gpt-image-1...");

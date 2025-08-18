@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 
 const HEDRA_API_KEY = process.env.HEDRA_API_KEY;
 
-if (!HEDRA_API_KEY) {
-  throw new Error("HEDRA_API_KEY environment variable is required");
+// Only check for API key at runtime, not during build
+if (process.env.NODE_ENV !== 'production' && !HEDRA_API_KEY) {
+  console.warn("HEDRA_API_KEY environment variable is not set");
 }
 
 export async function POST(request: NextRequest) {
   try {
+    // Check for API key at runtime
+    if (!HEDRA_API_KEY) {
+      return NextResponse.json(
+        { error: "HEDRA_API_KEY environment variable is required" },
+        { status: 500 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get("photo") as File;
 
@@ -25,7 +34,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-API-Key": HEDRA_API_KEY!,
+        "X-API-Key": HEDRA_API_KEY,
       },
       body: JSON.stringify({
         name: `avatar-photo-${Date.now()}`,
@@ -56,7 +65,7 @@ export async function POST(request: NextRequest) {
       {
         method: "POST",
         headers: {
-          "X-API-Key": HEDRA_API_KEY!,
+          "X-API-Key": HEDRA_API_KEY,
         },
         body: uploadFormData,
       }

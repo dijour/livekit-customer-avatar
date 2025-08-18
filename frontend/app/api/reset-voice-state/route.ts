@@ -1,25 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { existsSync, unlinkSync } from "fs";
-import { join } from "path";
 
 export async function POST(request: NextRequest) {
   try {
-    const backendDir = join(process.cwd(), "..", "backend");
-    const voiceStateFile = join(backendDir, "voice_state.txt");
-    const assetIdFile = join(backendDir, "current_asset_id.txt");
-    
-    // Remove voice state file to reset to Alexa mode
-    if (existsSync(voiceStateFile)) {
-      unlinkSync(voiceStateFile);
-      console.log("Reset voice state to Alexa mode");
+    // Handle cases where request body might be empty
+    let body = {};
+    try {
+      const text = await request.text();
+      if (text) {
+        body = JSON.parse(text);
+      }
+    } catch {
+      // If parsing fails, continue with empty body
+      console.log("No JSON body provided, using empty body");
+    }
+
+    const { clearAssetId } = body as { clearAssetId?: boolean };
+
+    console.log("Voice reset requested");
+    if (clearAssetId) {
+      console.log("Asset ID clear requested");
     }
     
-    // Optionally clear asset ID if requested
-    const body = await request.json();
-    if (body.clearAssetId && existsSync(assetIdFile)) {
-      unlinkSync(assetIdFile);
-      console.log("Cleared asset ID");
-    }
+    // Clear the in-memory avatar state
+    (global as any).avatarState = null;
 
     return NextResponse.json({ success: true, message: "Voice state reset to Alexa mode" });
   } catch (error) {

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import json
 from datetime import datetime
 from typing import AsyncIterable, Optional
 import io
@@ -64,7 +65,6 @@ Your role:
 Available voice commands you can instruct users to say:
 - "start camera" or "turn on camera" - activates the camera
 - "take photo" or "capture photo" - captures their photo
-- "skip photo" - skips photo capture and uses default avatar
 
 When users say these commands, you will automatically trigger the corresponding frontend actions.
 
@@ -446,97 +446,68 @@ async def show_photo_capture_ui(ctx: agents.JobContext) -> str:
         return f"Failed to show photo capture UI: {str(e)}"
 
 
-async def monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_file, avatar_voice_id, ctx):
-    """Monitor for voice switching signals and update TTS accordingly"""
-    print("Starting voice switch monitor...")
-    last_voice_state = None
-    last_alexa_mode = True
-    alexa_mode_file = "alexa_mode.txt"
+async def check_avatar_state_periodically(session, avatar_ref, avatar_voice_id, ctx):
+    """Periodically check for avatar state changes from API"""
+    import requests
+    last_state = None
     
     while True:
         try:
-            # Check alexa mode file for frontend-triggered mode changes
-            current_alexa_mode = True
-            if os.path.exists(alexa_mode_file):
-                with open(alexa_mode_file, 'r') as f:
-                    mode_value = f.read().strip().lower()
-                    current_alexa_mode = mode_value == 'true'
-            
-            # If mode switched from Alexa to Avatar via frontend
-            if last_alexa_mode and not current_alexa_mode:
-                print("Frontend triggered switch to avatar mode")
-                # Set voice state to trigger avatar initialization
-                with open(voice_state_file, 'w') as f:
-                    f.write("avatar")
-            
-            last_alexa_mode = current_alexa_mode
-            
-            # Check if voice state file indicates a switch to avatar mode
-            current_voice_state = None
-            if os.path.exists(voice_state_file):
-                with open(voice_state_file, 'r') as f:
-                    current_voice_state = f.read().strip()
-            
-            # Check if we should switch to avatar voice
-            if current_voice_state == "avatar" and last_voice_state != "avatar":
-                print("Switching to avatar voice and initializing avatar...")
+            # Check if there's avatar state from the API
+            try:
+                response = requests.get('http://localhost:3000/api/avatar-state', timeout=2)
+                if response.status_code == 200:
+                    current_state = response.json()
+                    
+                    if current_state and current_state != last_state:
+                        asset_id = current_state.get('assetId')
+                        switch_voice = current_state.get('switchVoice', False)
+                        
+                        if switch_voice and asset_id:
+                            print(f"API state change detected - switching to avatar: {asset_id}")
+                            
+                            # Initialize avatar if not already done
+                            if avatar_ref[0] is None:
+                                avatar_id = asset_id or "6467b4a7-5386-4ecf-a9da-574c061478e9"
+                                
+                                # Create and start avatar
+                                avatar_ref[0] = hedra.AvatarSession(avatar_id=avatar_id)
+                                await avatar_ref[0].start(session, room=ctx.room)
+                                print(f"Avatar initialized with ID: {avatar_id}")
+                            
+                            # Update TTS voice
+                            try:
+                                # Use avatar voice
+                                new_tts = elevenlabs.TTS(
+                                    voice_id=avatar_voice_id,
+                                    model="eleven_flash_v2_5"
+                                )
+                                
+                                # Update session TTS
+                                session._tts = new_tts
+                                
+                                # Generate handoff message
+                                print("🎭 AVATAR: Switching to avatar personality")
+                                await session.generate_reply(
+                                    instructions="Announce that you are now the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
+                                )
+                                
+                                print("Successfully switched to avatar voice")
+                                
+                            except Exception as e:
+                                print(f"Error switching to avatar voice: {e}")
+                        
+                        last_state = current_state
+                        
+            except requests.exceptions.RequestException:
+                # API not available, continue checking
+                pass
                 
-                # Initialize avatar if not already done
-                if avatar_ref[0] is None:
-                    # Read avatar ID from file
-                    avatar_id = "6467b4a7-5386-4ecf-a9da-574c061478e9"  # default
-                    if os.path.exists(asset_id_file):
-                        with open(asset_id_file, 'r') as f:
-                            file_asset_id = f.read().strip()
-                            if file_asset_id:
-                                avatar_id = file_asset_id
-                    
-                    # Create and start avatar
-                    avatar_ref[0] = hedra.AvatarSession(avatar_id=avatar_id)
-                    await avatar_ref[0].start(session, room=ctx.room)
-                    print(f"Avatar initialized with ID: {avatar_id}")
-                
-                # Update TTS voice
-                try:
-                    # Try to create instant voice clone from accumulated audio
-                    instant_voice_id = None
-                    if hasattr(session._agent, 'create_instant_voice_clone'):
-                        instant_voice_id = await session._agent.create_instant_voice_clone()
-                    
-                    # Use instant clone if available, otherwise fall back to default avatar voice
-                    voice_to_use = instant_voice_id if instant_voice_id else avatar_voice_id
-                    voice_type = "instant clone" if instant_voice_id else "default avatar"
-                    
-                    print(f"🎭 SURPRISE: Using {voice_type} voice (ID: {voice_to_use})")
-                    
-                    # Create new TTS with selected voice
-                    new_tts = elevenlabs.TTS(
-                        voice_id=voice_to_use,
-                        model="eleven_flash_v2_5"
-                    )
-                    
-                    # Update session TTS
-                    session._tts = new_tts
-                    
-                    # Generate handoff message with new instructions inline
-                    print("🎭 AVATAR: Switching to avatar personality")
-                    await session.generate_reply(
-                        instructions="Announce that you are now the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
-                    )
-                    
-                    print("Successfully switched to avatar voice")
-                    
-                except Exception as e:
-                    print(f"Error switching to avatar voice: {e}")
-            
-            last_voice_state = current_voice_state
-            
-            # Check every 2 seconds
-            await asyncio.sleep(2)
-            
         except Exception as e:
-            print(f"Error in voice switch monitor: {e}")
-            await asyncio.sleep(5)
+            print(f"Error checking avatar state: {e}")
+        
+        # Check every 3 seconds
+        await asyncio.sleep(3)
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -549,31 +520,11 @@ async def entrypoint(ctx: agents.JobContext):
     voice_state_file = "voice_state.txt"
     alexa_mode_file = "alexa_mode.txt"
     
-    # Clear state files on startup to always start fresh with Alexa
-    try:
-        if os.path.exists(voice_state_file):
-            os.remove(voice_state_file)
-            print("Cleared voice_state.txt for fresh start")
-        if os.path.exists(asset_id_file):
-            os.remove(asset_id_file)
-            print("Cleared current_asset_id.txt for fresh start")
-        if os.path.exists(alexa_mode_file):
-            os.remove(alexa_mode_file)
-            print("Cleared alexa_mode.txt for fresh start")
-    except Exception as e:
-        print(f"Error clearing state files: {e}")
+    # No need to clear files - using LiveKit data messages now
+    print("Starting with Alexa voice mode (data message communication)")
     
-    # Check alexa mode from file, default to True
+    # Default to Alexa mode for fresh start
     is_alexa_mode = True
-    try:
-        if os.path.exists(alexa_mode_file):
-            with open(alexa_mode_file, 'r') as f:
-                mode_value = f.read().strip().lower()
-                is_alexa_mode = mode_value == 'true'
-                print(f"Read alexa_mode from file: {is_alexa_mode}")
-    except Exception as e:
-        print(f"Error reading alexa_mode file: {e}")
-        is_alexa_mode = True
     current_voice_id = ALEXA_VOICE_ID
     has_avatar = False
     
@@ -629,7 +580,7 @@ async def entrypoint(ctx: agents.JobContext):
                         - Be encouraging and helpful throughout the process
                         - Speak naturally as Alexa would
 
-                        Start by greeting them and explaining that you've opened the photo capture interface. Tell them they can say "start camera" when they're ready to begin."""
+                        Start by greeting them and explaining that they are about to make a digital copy of themselves. Tell them they can talk a bit about themselves first, and then say "start camera" when they're ready to begin."""
     else:
         instructions = """You are the user's newly created personalized avatar. You've just been brought to life from their photo and are excited to meet them.
 
@@ -660,9 +611,9 @@ async def entrypoint(ctx: agents.JobContext):
     # Use a list to hold avatar reference for voice switching
     avatar_ref = [avatar]
     
-    # Start voice switching monitor task
-    voice_monitor_task = asyncio.create_task(
-        monitor_voice_switch(session, avatar_ref, voice_state_file, asset_id_file, AVATAR_VOICE_ID, ctx)
+    # Start avatar state monitoring task
+    avatar_monitor_task = asyncio.create_task(
+        check_avatar_state_periodically(session, avatar_ref, AVATAR_VOICE_ID, ctx)
     )
 
     # Add session event logging to debug STT
@@ -684,34 +635,46 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Immediate greeting after session start
     async def initial_greeting():
-        print("Starting initial greeting sequence...")
-        await asyncio.sleep(2)  # Wait for session to fully initialize
+        """Send initial greeting after ensuring session is ready"""
         
-        if is_alexa_mode:
-            print("Triggering Alexa greeting and photo capture UI...")
-            # Show photo capture UI and greet user
-            await show_photo_capture_ui(ctx)
-            try:
+        # Wait for session to be fully initialized and connected
+        max_wait = 10  # seconds
+        waited = 0
+        while waited < max_wait:
+            if hasattr(session, '_tts') and session._tts is not None:
+                break
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        
+        if waited >= max_wait:
+            print("⚠️ Session TTS not ready after 10 seconds, proceeding anyway")
+        
+        try:
+            # Check if session is running before generating reply
+            if hasattr(session, '_running') and not session._running:
+                print("⚠️ Session not running, skipping greeting")
+                return
+            
+            # Only send Alexa greeting if we're in Alexa mode
+            if is_alexa_mode:
+                print("Triggering Alexa greeting and photo capture UI...")
+                # Send greeting message
                 await session.generate_reply(
-                    instructions="Immediately greet the user as Alexa. Say 'Hey! You're about to create a digital clone of yourself. I'm Alexa, and I'm here to help you create your personalized avatar. Why don't you start by telling me a little bit about yourself? Then, when you're ready to take your photo, just say start camera and I'll guide you through the process.'"
+                    instructions="Greet the user warmly and let them know you're Alexa, here to help them create a personalized avatar. Ask if they're ready to take a photo for their avatar."
                 )
-            except Exception as e:
-                print(f"❌ TTS Error during Alexa greeting: {e}")
-                # Try a shorter, simpler greeting as fallback
-                try:
-                    await session.generate_reply(
-                        instructions="Say: 'Hi! I'm here to help you create your avatar. Say 'start camera' when ready.'"
-                    )
-                except Exception as e2:
-                    print(f"❌ TTS Error during fallback greeting: {e2}")
-                    print("⚠️ TTS service appears to be unavailable")
-        else:
-            print("Triggering avatar greeting...")
-            await session.generate_reply(
-                instructions="Greet the user as their newly created personalized avatar. Express excitement about being created and ask how you can help them."
-            )
+            else:
+                print("Starting in avatar mode - skipping Alexa greeting")
+                # Send avatar greeting instead
+                await session.generate_reply(
+                    instructions="Announce that you are the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
+                )
+                
+        except Exception as e:
+            print(f"❌ TTS Error during greeting: {e}")
+            print("⚠️ TTS service appears to be unavailable")
     
-    # Start immediate greeting
+    # Start greeting after a delay to ensure everything is initialized
+    asyncio.create_task(asyncio.sleep(3))
     asyncio.create_task(initial_greeting())
     
     # Also set up participant connection handler as backup
@@ -721,11 +684,13 @@ async def entrypoint(ctx: agents.JobContext):
     
     ctx.room.on("participant_connected", on_participant_connected)
     
-    # Keep the voice monitor running
+    # Keep the session running with avatar monitoring
     try:
-        await voice_monitor_task
+        await avatar_monitor_task
     except asyncio.CancelledError:
-        print("Voice monitor task cancelled")
+        print("Avatar monitor task cancelled")
+    except Exception as e:
+        print(f"Error in avatar monitor: {e}")
 
 
 if __name__ == "__main__":

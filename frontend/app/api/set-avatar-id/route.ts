@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFileSync } from "fs";
-import { join } from "path";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,20 +12,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Write asset ID to a file that the backend can read
-    const backendDir = join(process.cwd(), "..", "backend");
-    const assetIdFile = join(backendDir, "current_asset_id.txt");
-    
-    writeFileSync(assetIdFile, assetId);
-    
-    // If switchVoice is true, write voice state file to trigger voice switch
+    console.log(`Avatar ID received: ${assetId}`);
     if (switchVoice) {
-      const voiceStateFile = join(backendDir, "voice_state.txt");
-      writeFileSync(voiceStateFile, "avatar");
-      console.log("Triggered voice switch to avatar mode");
+      console.log("Voice switch requested");
     }
     
-    console.log(`Set asset ID: ${assetId}`);
+    // Store in a simple in-memory store that backend can check
+    // This is a temporary solution - in production you'd use Redis or similar
+    (global as any).avatarState = {
+      assetId,
+      switchVoice: switchVoice || false,
+      timestamp: Date.now()
+    };
 
     return NextResponse.json({ success: true, assetId });
   } catch (error) {

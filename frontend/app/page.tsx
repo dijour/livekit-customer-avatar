@@ -8,7 +8,6 @@ import { Button } from '../components/Button';
 import { MaskedMediaView } from "@components/MaskedMediaView";
 import { useAvatarSetup } from "../hooks/useAvatarSetup";
 import {
-  BarVisualizer,
   RoomAudioRenderer,
   RoomContext,
   VideoTrack,
@@ -26,7 +25,7 @@ export default function Page() {
   const [isSimulation, setIsSimulation] = useState(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
-  const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(false);
+  const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(true);
   const [showAlexaTransition, setShowAlexaTransition] = useState(false);
   const [showAvatarAppears, setShowAvatarAppears] = useState(false);
   const avatarSetup = useAvatarSetup();
@@ -70,13 +69,22 @@ export default function Page() {
       
       const connectionDetailsData: ConnectionDetails = await response.json();
       console.log("Connection details:", connectionDetailsData);
-
+      
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
       
       // Register RPC methods for backend agent to call frontend functions
       room.registerRpcMethod('startCamera', async () => {
         console.log('🎥 Frontend RPC: startCamera called');
+        
+        // Photo capture UI should now always be available when no avatar exists
+        console.log('🎥 Avatar exists:', !!avatarSetup.state.assetId);
+        
+        // Wait a moment for component to be ready if needed
+        if (!photoCaptureRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
         console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
         console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
         
@@ -184,6 +192,34 @@ export default function Page() {
     };
   }, [room, avatarSetup, photoCaptureRef]);
 
+  // Clear room context on component mount to ensure clean session start
+  useEffect(() => {
+    const clearSessionState = async () => {
+      // Clear any existing room participants/agents from previous sessions
+      if (room.remoteParticipants.size > 0) {
+        console.log('🧹 Clearing existing room participants from previous session');
+        room.remoteParticipants.clear();
+      }
+      
+      // Clear room metadata to prevent avatar mode persistence
+      if (room.metadata) {
+        console.log('🧹 Clearing room metadata from previous session');
+        // Clear metadata by setting it to empty via setMetadata
+        room.localParticipant.setMetadata('');
+      }
+      
+      // Clear avatar state from API endpoint on session start
+      try {
+        await fetch('/api/clear-avatar-state', { method: 'POST' });
+        console.log('🧹 Cleared avatar state from API');
+      } catch (error) {
+        console.error('Failed to clear avatar state on session start:', error);
+      }
+    };
+    
+    clearSessionState();
+  }, [room]);
+
   // Auto-start conversation only after user interaction (to allow audio playback)
   useEffect(() => {
     if (hasUserInteracted && room.state === 'disconnected' && !isAutoConnecting) {
@@ -196,9 +232,17 @@ export default function Page() {
   }, []);
 
   const handleResetExperience = useCallback(async () => {
-    // Disconnect from room
+    // Disconnect from room and clear all room state
     if (room.state === 'connected') {
       await room.disconnect();
+    }
+    
+    // Clear any lingering room participants or agents
+    room.remoteParticipants.clear();
+    
+    // Clear room metadata to ensure fresh start
+    if (room.metadata) {
+      room.localParticipant.setMetadata('');
     }
     
     // Reset all states
@@ -217,6 +261,13 @@ export default function Page() {
       await fetch('/api/reset-voice-state', { method: 'POST' });
     } catch (error) {
       console.error('Failed to reset voice state:', error);
+    }
+    
+    // Clear avatar state from API endpoint
+    try {
+      await fetch('/api/clear-avatar-state', { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to clear avatar state:', error);
     }
   }, [room, avatarSetup]);
 
@@ -261,9 +312,9 @@ export default function Page() {
       <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
 
         
-        {/* Show photo capture overlay when triggered by agent */}
+        {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
         <AnimatePresence mode="wait">
-          {avatarSetup.showPhotoCapture && (
+          {(!avatarSetup.state.assetId || avatarSetup.showPhotoCapture) && (
             <PhotoCapture 
               key="photo-capture"
               ref={photoCaptureRef}
@@ -341,7 +392,7 @@ export default function Page() {
         </AnimatePresence>
 
         {/* Always show voice assistant for agent connection */}
-        <SimpleVoiceAssistant 
+        <SimpleVoiceAssistant
           onConnectButtonClicked={onConnectButtonClicked}
           isSimulation={isSimulation}
           setIsSimulation={setIsSimulation}
@@ -349,6 +400,7 @@ export default function Page() {
           photoCaptureRef={photoCaptureRef}
           onResetExperience={handleResetExperience}
           showPhotoCaptureButton={showPhotoCaptureButton}
+          avatarExists={!!avatarSetup.state.assetId}
         />
 
         {/* Error notification */}
@@ -380,6 +432,7 @@ function SimpleVoiceAssistant(props: {
   photoCaptureRef: React.RefObject<PhotoCaptureRef | null>;
   onResetExperience: () => Promise<void>;
   showPhotoCaptureButton: boolean;
+  avatarExists: boolean;
 }) {
   const { state: agentState } = useVoiceAssistant();
   const { localParticipant } = useLocalParticipant();
@@ -470,7 +523,7 @@ function SimpleVoiceAssistant(props: {
               </div>
               {/* Right column - Photo capture controls */}
               <div className="flex-shrink-0">
-                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} />
+                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} />
               </div>
             </div>
             
@@ -484,7 +537,7 @@ function SimpleVoiceAssistant(props: {
 }
 
 function AgentVisualizer() {
-  const { state: agentState, videoTrack, audioTrack } = useVoiceAssistant();
+  const { videoTrack } = useVoiceAssistant();
   const { isSimulation } = useContext(RoomContext) as RoomContextType;
   if (isSimulation) {
     return (
@@ -510,26 +563,12 @@ function AgentVisualizer() {
   return null;
 }
 
-function PhotoCaptureStatus() {
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [capturedPhoto, setCapturedPhoto] = useState(false);
-  const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
-  
-  if (currentStep === 'capture' && !capturedPhoto && !isStreaming) return 'Enable camera access to scan face';
-  if (currentStep === 'capture' && isStreaming) return 'Position your face in the circle';
-  if (currentStep === 'capture' && capturedPhoto) return 'Photo captured';
-  if (currentStep === 'enhance') return 'Enhancing photo...';
-  if (currentStep === 'confirm') return 'Ready to use';
-  return 'Ready to capture';
-}
 
-function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean }) {
+function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(false);
-  const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
-  const [error, setError] = useState<string | null>(null);
-  const avatarSetup = useAvatarSetup();
+  const [error] = useState<string | null>(null);
   
   // Feature flag: enable full workflow only if URL contains #modify
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
@@ -614,7 +653,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
 
       <div className="flex gap-2 flex-wrap justify-center">
         <AnimatePresence mode="wait">
-          {!isStreaming && !capturedPhoto && showPhotoCaptureButton && (
+          {!isStreaming && !capturedPhoto && (!avatarExists || showPhotoCaptureButton) && (
             <Button key="start" onClick={handleStartCamera}>
               Start Camera
             </Button>
@@ -656,16 +695,6 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton }: { pho
   );
 }
 
-function ControlBar(props: { onConnectButtonClicked: () => void }) {
-  const { state: agentState } = useVoiceAssistant();
-
-  return (
-    <div className="relative h-[60px]">
-      <AnimatePresence>
-      </AnimatePresence>
-    </div>
-  );
-}
 
 function onDeviceFailure(error: Error) {
   console.error(error);

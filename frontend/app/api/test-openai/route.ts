@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     console.log("=== Testing OpenAI API Key ===");
     console.log("API Key present:", !!process.env.OPENAI_API_KEY);
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "OpenAI API key is working",
-      hasImage: !!response.data[0]?.b64_json
+      hasImage: !!(response.data && response.data[0]?.b64_json)
     });
     
   } catch (error) {

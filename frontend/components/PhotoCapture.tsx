@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "./Button";
+import { motion } from "framer-motion";
 import { MaskedMediaView } from "./MaskedMediaView";
 
 interface PhotoCaptureProps {
@@ -20,7 +19,7 @@ export interface PhotoCaptureRef {
   retakePhoto: () => void;
 }
 
-const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onSkip, onStateChange, onShowAlexaTransition }, ref) => {
+const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onStateChange, onShowAlexaTransition }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
