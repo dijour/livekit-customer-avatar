@@ -303,9 +303,13 @@ You are no longer in setup mode - the avatar creation is complete and you're now
             print(f"   ⏱️  Duration: {actual_duration:.1f}s from {segment_count} segments")
             print(f"   🎤 Ready to use for TTS!")
             
-            # Store the custom voice ID for later use
-            with open("custom_voice_id.txt", "w") as f:
-                f.write(voice.voice_id)
+            # Store the custom voice ID in room metadata
+            try:
+                room = get_job_context().room
+                await room.local_participant.set_metadata(f'{{"customVoiceId": "{voice.voice_id}"}}')
+                print(f"🎯 Stored custom voice ID in room metadata: {voice.voice_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to store custom voice ID in room metadata: {e}")
             
             # Reset accumulator for next consolidation
             self.voice_accumulator = []
@@ -481,15 +485,18 @@ async def check_avatar_state_periodically(session, avatar_ref, default_avatar_vo
                             
                             # Update TTS voice
                             try:
-                                # Check for custom voice ID first, fallback to default
+                                # Check for custom voice ID in room metadata first, fallback to default
                                 custom_voice_id = None
                                 try:
-                                    with open("custom_voice_id.txt", "r") as f:
-                                        custom_voice_id = f.read().strip()
+                                    import json
+                                    local_participant = ctx.room.local_participant
+                                    if local_participant.metadata:
+                                        metadata = json.loads(local_participant.metadata)
+                                        custom_voice_id = metadata.get('customVoiceId')
                                         if custom_voice_id:
-                                            print(f"🎯 Using custom voice ID: {custom_voice_id}")
-                                except FileNotFoundError:
-                                    print("🎯 No custom voice ID found, using default")
+                                            print(f"🎯 Using custom voice ID from room metadata: {custom_voice_id}")
+                                except Exception as e:
+                                    print(f"🎯 No custom voice ID in room metadata: {e}")
                                 
                                 voice_id_to_use = custom_voice_id if custom_voice_id else default_avatar_voice_id
                                 print(f"🎭 Switching to voice ID: {voice_id_to_use}")
@@ -536,6 +543,10 @@ async def entrypoint(ctx: agents.JobContext):
     asset_id_file = "current_asset_id.txt"
     voice_state_file = "voice_state.txt"
     alexa_mode_file = "alexa_mode.txt"
+    custom_voice_file = "custom_voice_id.txt"
+    
+    # Custom voice ID will be stored in room metadata instead of files
+    # Room metadata is automatically cleared when room disconnects
     
     # No need to clear files - using LiveKit data messages now
     print("Starting with Alexa voice mode (data message communication)")
