@@ -459,18 +459,20 @@ class Orchestrator:
                 if pkt.topic == "mode_switch":
                     message = json.loads(pkt.data.decode("utf-8"))
                     if message.get("action") == "switch_mode":
-                        # Store avatar ID from the message if provided
+                        # Store avatar ID from the message if provided and wait for it
                         avatar_id = message.get("avatarId")
                         if avatar_id:
                             print(f"🎭 Received avatar ID via room data: {avatar_id}")
-                            # Store in room metadata for immediate access
-                            asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
-                        asyncio.create_task(self._switch_mode(message.get("mode", "alexa")))
+                            # Store immediately and wait for completion before mode switch
+                            asyncio.create_task(self._store_and_switch_mode(avatar_id, message.get("mode", "alexa")))
+                        else:
+                            asyncio.create_task(self._switch_mode(message.get("mode", "alexa")))
                 elif pkt.topic == "avatar_data":
                     message = json.loads(pkt.data.decode("utf-8"))
                     avatar_id = message.get("assetId")
                     if avatar_id:
                         print(f"🎭 Received avatar ID via avatar_data: {avatar_id}")
+                        # Store immediately without waiting for mode switch
                         asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
             except Exception as e:
                 print(f"❌ data_received error: {e}")
@@ -488,6 +490,19 @@ class Orchestrator:
             print(f"🔖 Stored avatar_id in local participant metadata: {avatar_id}")
         except Exception as e:
             print(f"⚠️ Failed to store avatar_id in local participant metadata: {e}")
+
+    async def _store_and_switch_mode(self, avatar_id: str, mode: str) -> None:
+        """Store avatar ID first, then switch mode to ensure proper timing"""
+        try:
+            # Store avatar ID first and wait for completion
+            await self._store_avatar_id_in_room(avatar_id)
+            print(f"✅ Avatar ID stored, now switching to {mode} mode")
+            # Longer delay to ensure metadata is fully persisted
+            await asyncio.sleep(0.5)
+            # Then switch mode
+            await self._switch_mode(mode)
+        except Exception as e:
+            print(f"❌ store_and_switch_mode error: {e}")
 
     # ---- Greetings ----
     async def _alexa_greeting(self) -> None:
