@@ -548,15 +548,19 @@ class Orchestrator:
         return None
 
     def _get_avatar_id_from_room(self) -> Optional[str]:
+        """Get avatar ID from local participant metadata where we stored it"""
         try:
-            md = self.ctx.room.metadata
+            md = self.ctx.room.local_participant.metadata
             if not md:
                 return None
             data = json.loads(md)
-            return data.get("avatar_id")
+            avatar_id = data.get("avatar_id")
+            if avatar_id:
+                print(f"🎭 Found avatar ID from local participant metadata: {avatar_id}")
+                return avatar_id
         except Exception as e:
-            print(f"⚠️ avatar_id from room metadata failed: {e}")
-            return None
+            print(f"⚠️ avatar_id from local participant metadata failed: {e}")
+        return None
 
     # ---- Poll local API for voice switch / avatar events ----
     async def _poll_avatar_state(self) -> None:
