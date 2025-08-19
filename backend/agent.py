@@ -86,8 +86,26 @@ class Config:
     target_consolidation_secs: float = float(os.getenv("VOICE_CONSOLIDATION_SECS", 10))
     instant_clone_min_secs: float = float(os.getenv("INSTANT_CLONE_MIN_SECS", 3))
 
-    # Local dev API for avatar state polling
-    poll_api_url: str = os.getenv("AVATAR_STATE_URL", "http://localhost:3000/api/avatar-state")
+    # API for avatar state polling - dynamic based on environment
+    @property
+    def poll_api_url(self) -> str:
+        # Check if we have an explicit URL set
+        explicit_url = os.getenv("AVATAR_STATE_URL")
+        if explicit_url:
+            return explicit_url
+        
+        # Auto-detect based on environment indicators
+        is_production = (
+            os.getenv("VERCEL") == "1" or  # Vercel deployment
+            os.getenv("NODE_ENV") == "production" or
+            os.getenv("RAILWAY_ENVIRONMENT") == "production" or  # Railway deployment
+            os.getenv("RENDER") == "true"  # Render deployment
+        )
+        
+        if is_production:
+            return "https://livekit-customer-avatar.vercel.app/api/avatar-state"
+        else:
+            return "http://localhost:3000/api/avatar-state"
     poll_interval_secs: float = float(os.getenv("POLL_INTERVAL_SECS", 3))
 
 
