@@ -129,14 +129,31 @@ export function useAvatarSetup() {
     dispatch({ type: 'PHOTO_CAPTURED', payload: photoBlob });
     await createAvatar(photoBlob);
 
-    // Send mode switch message via LiveKit room data instead of API call
+    // Send avatar data and mode switch message via LiveKit room data
     try {
-      // Get room context from window if available
-      const room = (window as any).liveKitRoom;
+      const room = (window as any).liveKitRoom as { localParticipant?: { publishData: (data: Uint8Array, options: { topic: string }) => Promise<void> } };
       if (room && room.localParticipant) {
+        // Get the created avatar ID from state
+        const assetId = localStorage.getItem("hedraAssetId");
+        
+        if (assetId) {
+          // Send avatar data first
+          const avatarMessage = {
+            assetId: assetId
+          };
+          
+          await room.localParticipant.publishData(
+            new TextEncoder().encode(JSON.stringify(avatarMessage)),
+            { topic: 'avatar_data' }
+          );
+          console.log('📨 Sent avatar data via room data:', avatarMessage);
+        }
+
+        // Then send mode switch message with avatar ID
         const modeMessage = {
           action: 'switch_mode',
-          mode: 'avatar'
+          mode: 'avatar',
+          avatarId: assetId
         };
         
         await room.localParticipant.publishData(

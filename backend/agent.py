@@ -456,13 +456,38 @@ class Orchestrator:
         @self.ctx.room.on("data_received")
         def _on_data(pkt: rtc.DataPacket):
             try:
-                if pkt.topic != "mode_switch":
-                    return
-                message = json.loads(pkt.data.decode("utf-8"))
-                if message.get("action") == "switch_mode":
-                    asyncio.create_task(self._switch_mode(message.get("mode", "alexa")))
+                if pkt.topic == "mode_switch":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    if message.get("action") == "switch_mode":
+                        # Store avatar ID from the message if provided
+                        avatar_id = message.get("avatarId")
+                        if avatar_id:
+                            print(f"🎭 Received avatar ID via room data: {avatar_id}")
+                            # Store in room metadata for immediate access
+                            asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
+                        asyncio.create_task(self._switch_mode(message.get("mode", "alexa")))
+                elif pkt.topic == "avatar_data":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    avatar_id = message.get("assetId")
+                    if avatar_id:
+                        print(f"🎭 Received avatar ID via avatar_data: {avatar_id}")
+                        asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
             except Exception as e:
                 print(f"❌ data_received error: {e}")
+
+    # ---- Helper methods ----
+    async def _store_avatar_id_in_room(self, avatar_id: str) -> None:
+        """Store avatar ID in local participant metadata for immediate access"""
+        try:
+            current_metadata = {}
+            if self.ctx.room.local_participant.metadata:
+                current_metadata = json.loads(self.ctx.room.local_participant.metadata)
+            
+            current_metadata["avatar_id"] = avatar_id
+            await self.ctx.room.local_participant.set_metadata(json.dumps(current_metadata))
+            print(f"🔖 Stored avatar_id in local participant metadata: {avatar_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to store avatar_id in local participant metadata: {e}")
 
     # ---- Greetings ----
     async def _alexa_greeting(self) -> None:
