@@ -508,9 +508,20 @@ class Orchestrator:
                 )
 
                 if not self.avatar:
-                    # Try to get avatar ID from polling state first, then room metadata, then default
-                    avatar_id = self._get_avatar_id_from_polling_state() or self._get_avatar_id_from_room() or self.cfg.default_avatar_id
+                    # Try to get avatar ID from multiple sources with detailed logging
+                    polling_id = self._get_avatar_id_from_polling_state()
+                    room_id = self._get_avatar_id_from_room()
+                    
+                    print(f"🔍 Avatar ID sources - Polling: {polling_id}, Room: {room_id}, Default: {self.cfg.default_avatar_id}")
+                    
+                    avatar_id = polling_id or room_id or self.cfg.default_avatar_id
                     print(f"🎭 Creating avatar session with ID: {avatar_id}")
+                    
+                    if avatar_id != self.cfg.default_avatar_id:
+                        print(f"✅ Using custom avatar ID: {avatar_id}")
+                    else:
+                        print(f"⚠️ Falling back to default avatar ID: {avatar_id}")
+                    
                     self.avatar = hedra.AvatarSession(avatar_id=avatar_id)
                     await self.avatar.start(self.session, room=self.ctx.room)
                     print(f"🎭 Avatar session started successfully")
@@ -536,13 +547,22 @@ class Orchestrator:
         """Get avatar ID from the polling state (set by frontend via /api/set-avatar-id)"""
         try:
             if REQUESTS_AVAILABLE:
+                print(f"🔍 Polling avatar state from: {self.cfg.poll_api_url}")
                 resp = requests.get(self.cfg.poll_api_url, timeout=2)
+                print(f"🔍 Polling response status: {resp.status_code}")
                 if resp.status_code == 200:
                     state = resp.json() or {}
+                    print(f"🔍 Polling state data: {state}")
                     avatar_id = state.get("assetId")
                     if avatar_id:
                         print(f"🎭 Found avatar ID from polling state: {avatar_id}")
                         return avatar_id
+                    else:
+                        print("🔍 No assetId found in polling state")
+                else:
+                    print(f"🔍 Polling failed with status: {resp.status_code}")
+            else:
+                print("🔍 Requests not available for polling")
         except Exception as e:
             print(f"⚠️ Failed to get avatar ID from polling state: {e}")
         return None
@@ -551,13 +571,18 @@ class Orchestrator:
         """Get avatar ID from local participant metadata where we stored it"""
         try:
             md = self.ctx.room.local_participant.metadata
+            print(f"🔍 Local participant metadata: {md}")
             if not md:
+                print("🔍 No local participant metadata found")
                 return None
             data = json.loads(md)
+            print(f"🔍 Parsed metadata: {data}")
             avatar_id = data.get("avatar_id")
             if avatar_id:
                 print(f"🎭 Found avatar ID from local participant metadata: {avatar_id}")
                 return avatar_id
+            else:
+                print("🔍 No avatar_id found in local participant metadata")
         except Exception as e:
             print(f"⚠️ avatar_id from local participant metadata failed: {e}")
         return None
