@@ -535,6 +535,8 @@ async def check_avatar_state_periodically(session, avatar_ref, default_avatar_vo
 
 
 async def entrypoint(ctx: agents.JobContext):
+    print("🚀 ENTRYPOINT: Function started")
+    
     # Voice configuration
     ALEXA_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice for setup (more reliable)
     AVATAR_VOICE_ID = "UtaLMHFQy5D4jbOLM0tN"  # Custom avatar voice
@@ -543,23 +545,22 @@ async def entrypoint(ctx: agents.JobContext):
     asset_id_file = "current_asset_id.txt"
     voice_state_file = "voice_state.txt"
     alexa_mode_file = "alexa_mode.txt"
-    custom_voice_file = "custom_voice_id.txt"
     
-    # Custom voice ID will be stored in room metadata instead of files
-    # Room metadata is automatically cleared when room disconnects
+    # Check if avatar file exists
+    has_avatar = os.path.exists(asset_id_file)
+    print(f"🚀 ENTRYPOINT: Avatar file exists: {has_avatar}")
     
-    # No need to clear files - using LiveKit data messages now
-    print("Starting with Alexa voice mode (data message communication)")
+    # Get voice mode from environment or default to Alexa
+    voice_mode = os.getenv("VOICE_MODE", "Alexa")
+    voice_id = os.getenv("VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default to Alexa voice
     
-    # Default to Alexa mode for fresh start
-    is_alexa_mode = True
-    current_voice_id = ALEXA_VOICE_ID
-    has_avatar = False
+    print(f"Starting with {voice_mode} voice mode (data message communication)")
+    print(f"Starting with voice mode: {voice_mode}, Voice ID: {voice_id}")
+    print("🚀 ENTRYPOINT: About to initialize Assistant")
     
-    print(f"Starting with voice mode: {'Alexa' if is_alexa_mode else 'Avatar'}, Voice ID: {current_voice_id}")
-    
-    # Create LLM instance
-    llm_instance = openai.LLM(model="gpt-4.1")
+    # Initialize the assistant in Alexa mode
+    assistant = Assistant(is_alexa_mode=True, ctx=ctx)
+    print("🚀 ENTRYPOINT: Assistant initialized")
     
     # Setup avatar based on current state
     avatar_id = "6467b4a7-5386-4ecf-a9da-574c061478e9"  # default avatar ID
@@ -579,7 +580,17 @@ async def entrypoint(ctx: agents.JobContext):
         print(f"Using default avatar ID for Alexa mode: {avatar_id}")
     
     # Create session with appropriate TTS voice
+    is_alexa_mode = True  # Always use Alexa mode for now
     voice_id = ALEXA_VOICE_ID if is_alexa_mode else AVATAR_VOICE_ID
+    print(f"🚀 ENTRYPOINT: Using voice_id: {voice_id}, alexa_mode: {is_alexa_mode}")
+    
+    # Create LLM instance
+    llm_instance = openai.LLM(
+        model="gpt-4o-mini",
+        temperature=0.7,
+    )
+    print(f"🚀 ENTRYPOINT: LLM instance created")
+    
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", language="multi"),
         llm=llm_instance,
@@ -621,6 +632,7 @@ async def entrypoint(ctx: agents.JobContext):
     # Create our custom agent with voice command handling
     custom_agent = Assistant(is_alexa_mode=is_alexa_mode, ctx=ctx, instructions=instructions)
     
+    print("🚀 ENTRYPOINT: About to start session")
     await session.start(
         room=ctx.room,
         agent=custom_agent,
@@ -635,6 +647,7 @@ async def entrypoint(ctx: agents.JobContext):
             noise_cancellation=noise_cancellation.BVC(),
         ),
     )
+    print("🚀 ENTRYPOINT: Session started successfully")
 
     # Use a list to hold avatar reference for voice switching
     avatar_ref = [avatar]
@@ -643,6 +656,7 @@ async def entrypoint(ctx: agents.JobContext):
     avatar_monitor_task = asyncio.create_task(
         check_avatar_state_periodically(session, avatar_ref, AVATAR_VOICE_ID, ctx)
     )
+    print("🚀 ENTRYPOINT: Avatar monitor task created")
 
     # Add session event logging to debug STT
     @session.on("agent_speech_committed")
@@ -661,56 +675,265 @@ async def entrypoint(ctx: agents.JobContext):
     def on_user_stopped_speaking():
         print("🎤 USER: Stopped speaking")
 
+    # Add data received handler for mode switching
+    @ctx.room.on("data_received")
+    def on_data_received(data: rtc.DataPacket, participant: rtc.RemoteParticipant):
+        try:
+            if data.topic == "mode_switch":
+                message = json.loads(data.data.decode('utf-8'))
+                print(f"📨 Received mode switch message: {message}")
+                
+                if message.get("action") == "switch_mode":
+                    new_mode = message.get("mode")
+                    print(f"🔄 Mode switch requested: {new_mode}")
+                    
+                    # Create task to handle mode switch
+                    asyncio.create_task(handle_mode_switch(new_mode, session, avatar_ref, ctx))
+                    
+        except Exception as e:
+            print(f"❌ Error processing data message: {e}")
+    
+    print("🚀 ENTRYPOINT: Event handlers set up, now setting up greeting logic")
+
+    # Set up greeting logic for Alexa mode
+    current_mode = {"alexa": is_alexa_mode}
+    greeting_sent = {"value": False}
+    
+    async def initial_greeting():
+        """Send initial Alexa greeting"""
+        try:
+            print("🚀 GREETING: Starting initial greeting")
+            await asyncio.sleep(1)  # Brief delay for session readiness
+            
+            greeting_message = "Hello! I'm Alexa, and I'm here to help you create your personalized avatar. This is going to be exciting - we're about to make a digital copy of yourself! Feel free to tell me a bit about yourself first, and when you're ready to begin the photo capture process, just say 'start camera'."
+            
+            print(f"🚀 GREETING: Sending greeting: {greeting_message[:50]}...")
+            # Use the session's say method to speak the greeting
+            await session.say(greeting_message)
+            print("🚀 GREETING: Greeting sent successfully")
+            
+        except Exception as e:
+            print(f"❌ GREETING ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_participant_connected(participant: rtc.RemoteParticipant):
+        print(f"🔗 PARTICIPANT: User connected: {participant.identity}")
+        print(f"🔗 PARTICIPANT: Current mode alexa: {current_mode['alexa']}")
+        print(f"🔗 PARTICIPANT: Greeting sent: {greeting_sent['value']}")
+        
+        # Trigger greeting when user connects (only if in Alexa mode and not sent yet)
+        if current_mode["alexa"] and not greeting_sent["value"]:
+            print("🎤 PARTICIPANT: User connected - triggering Alexa greeting")
+            greeting_sent["value"] = True
+            asyncio.create_task(initial_greeting())
+        else:
+            print(f"🎤 PARTICIPANT: Skipping greeting - alexa_mode: {current_mode['alexa']}, already_sent: {greeting_sent['value']}")
+
+    ctx.room.on("participant_connected", on_participant_connected)
+    
+    print(f"🔍 STARTUP: Checking for existing participants...")
+    print(f"🔍 STARTUP: Remote participants count: {len(ctx.room.remote_participants)}")
+    print(f"🔍 STARTUP: Current mode alexa: {current_mode['alexa']}")
+    print(f"🔍 STARTUP: Greeting sent: {greeting_sent['value']}")
+    
+    # Also trigger greeting immediately if user is already connected
+    if current_mode["alexa"] and not greeting_sent["value"]:
+        # Check if there are already participants in the room
+        if len(ctx.room.remote_participants) > 0:
+            print("🎤 STARTUP: User already connected - triggering Alexa greeting")
+            greeting_sent["value"] = True
+            asyncio.create_task(initial_greeting())
+        else:
+            print("🎤 STARTUP: No participants yet, waiting for connection...")
+    else:
+        print(f"🎤 STARTUP: Not triggering greeting - alexa_mode: {current_mode['alexa']}, already_sent: {greeting_sent['value']}")
+    
+    # Keep the session running with avatar monitoring
+    print("🚀 ENTRYPOINT: Starting main session loop")
+    try:
+        await avatar_monitor_task
+    except asyncio.CancelledError:
+        print("Avatar monitor task cancelled")
+    except Exception as e:
+        print(f"Error in avatar monitor: {e}")
+
+async def handle_mode_switch(new_mode: str, session, avatar_ref: list, ctx):
+    """Handle switching between Alexa and Avatar modes"""
+    try:
+        print(f"🔄 Handling mode switch to: {new_mode}")
+        
+        if new_mode == "avatar":
+            # Switch to avatar mode
+            print("🎭 Switching to Avatar mode...")
+            
+            # Update TTS voice to avatar voice
+            session._tts = elevenlabs.TTS(
+                voice_id=AVATAR_VOICE_ID,
+                model="eleven_flash_v2_5"
+            )
+            
+            # Initialize avatar if not already done
+            if not avatar_ref[0]:
+                # Get avatar ID from room metadata (production-safe)
+                avatar_id = "6467b4a7-5386-4ecf-a9da-574c061478e9"  # default
+                
+                try:
+                    # Check room metadata for custom avatar ID
+                    room_metadata = ctx.room.metadata
+                    if room_metadata:
+                        metadata = json.loads(room_metadata)
+                        if metadata.get("avatar_id"):
+                            avatar_id = metadata["avatar_id"]
+                            print(f"Using custom avatar ID from room metadata: {avatar_id}")
+                except Exception as e:
+                    print(f"Error reading avatar ID from room metadata: {e}")
+                
+                avatar = hedra.AvatarSession(avatar_id=avatar_id)
+                await avatar.start(session, room=ctx.room)
+                avatar_ref[0] = avatar
+                print("🎭 Avatar session started")
+            
+            # Send avatar greeting
+            await session.generate_reply(
+                instructions="Announce that you are the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
+            )
+            
+        elif new_mode == "alexa":
+            # Switch back to Alexa mode
+            print("🔊 Switching to Alexa mode...")
+            
+            # Update TTS voice to Alexa voice
+            session._tts = elevenlabs.TTS(
+                voice_id=ALEXA_VOICE_ID,
+                model="eleven_flash_v2_5"
+            )
+            
+            # Send Alexa greeting
+            await session.generate_reply(
+                instructions="Greet the user as Alexa and ask how you can help them today."
+            )
+            
+    except Exception as e:
+        print(f"❌ Error in mode switch: {e}")
+
     # Immediate greeting after session start
     async def initial_greeting():
         """Send initial greeting after ensuring session is ready"""
+        print("🚀 GREETING: initial_greeting() called")
         
         # Wait for session to be fully initialized and connected
         max_wait = 10  # seconds
         waited = 0
+        print(f"🚀 GREETING: Waiting for session TTS to be ready...")
         while waited < max_wait:
             if hasattr(session, '_tts') and session._tts is not None:
+                print(f"🚀 GREETING: Session TTS ready after {waited}s")
                 break
             await asyncio.sleep(0.5)
             waited += 0.5
         
         if waited >= max_wait:
-            print("⚠️ Session TTS not ready after 10 seconds, proceeding anyway")
+            print("⚠️ GREETING: Session TTS not ready after 10 seconds, proceeding anyway")
         
         try:
             # Check if session is running before generating reply
+            print(f"🚀 GREETING: Checking session state - hasattr(_running): {hasattr(session, '_running')}")
+            if hasattr(session, '_running'):
+                print(f"🚀 GREETING: Session._running = {session._running}")
+            
             if hasattr(session, '_running') and not session._running:
-                print("⚠️ Session not running, skipping greeting")
+                print("⚠️ GREETING: Session not running, skipping greeting")
                 return
             
+            # Check current mode
+            print(f"🚀 GREETING: Current mode check - is_alexa_mode: {is_alexa_mode}")
+            print(f"🚀 GREETING: Current mode check - current_mode['alexa']: {current_mode['alexa']}")
+            
             # Only send Alexa greeting if we're in Alexa mode
-            if is_alexa_mode:
-                print("Triggering Alexa greeting and photo capture UI...")
+            if current_mode["alexa"]:
+                print("🚀 GREETING: Triggering Alexa greeting and photo capture UI...")
                 # Send greeting message
                 await session.generate_reply(
                     instructions="Greet the user warmly and let them know you're Alexa, here to help them create a personalized avatar. Ask if they're ready to take a photo for their avatar."
                 )
+                print("🚀 GREETING: Alexa greeting sent successfully!")
             else:
-                print("Starting in avatar mode - skipping Alexa greeting")
+                print("🚀 GREETING: Starting in avatar mode - skipping Alexa greeting")
                 # Send avatar greeting instead
                 await session.generate_reply(
                     instructions="Announce that you are the user's personalized avatar, created from their photo. Thank them for creating you and ask how you can help them today."
                 )
+                print("🚀 GREETING: Avatar greeting sent successfully!")
                 
         except Exception as e:
-            print(f"❌ TTS Error during greeting: {e}")
+            print(f"❌ GREETING ERROR: {e}")
+            print(f"❌ GREETING ERROR TYPE: {type(e)}")
+            import traceback
+            print(f"❌ GREETING TRACEBACK: {traceback.format_exc()}")
             print("⚠️ TTS service appears to be unavailable")
     
-    # Start greeting after a delay to ensure everything is initialized
-    asyncio.create_task(asyncio.sleep(3))
-    asyncio.create_task(initial_greeting())
+    # Monitor room metadata for dynamic mode changes
+    current_mode = {"alexa": is_alexa_mode}  # Use dict for mutable reference
     
-    # Also set up participant connection handler as backup
+    @ctx.room.on("room_metadata_changed")
+    def on_room_metadata_changed(metadata: str):
+        try:
+            if metadata:
+                data = json.loads(metadata)
+                new_alexa_mode = data.get("alexa_mode", True)  # Default to True
+                
+                if new_alexa_mode != current_mode["alexa"]:
+                    print(f"🔄 Room metadata changed: alexa_mode = {new_alexa_mode}")
+                    current_mode["alexa"] = new_alexa_mode
+                    
+                    # Trigger appropriate greeting for mode change
+                    if new_alexa_mode:
+                        print("🔊 Switching to Alexa mode via metadata")
+                        asyncio.create_task(initial_greeting())
+                    else:
+                        print("🎭 Switching to Avatar mode via metadata")
+                        # Avatar greeting will be handled by mode switch data message
+                        
+        except Exception as e:
+            print(f"❌ Error processing room metadata change: {e}")
+    
+    # Track if greeting has been sent to avoid duplicates
+    greeting_sent = {"value": False}
+    
+    # Set up participant connection handler to trigger greeting
     def on_participant_connected(participant):
         if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_STANDARD:
-            print(f"User participant connected: {participant.identity}")
+            print(f"🔗 PARTICIPANT: User participant connected: {participant.identity}")
+            print(f"🔗 PARTICIPANT: Current mode alexa: {current_mode['alexa']}")
+            print(f"🔗 PARTICIPANT: Greeting sent: {greeting_sent['value']}")
+            
+            # Trigger greeting when user connects (only if in Alexa mode and not sent yet)
+            if current_mode["alexa"] and not greeting_sent["value"]:
+                print("🎤 PARTICIPANT: User connected - triggering Alexa greeting")
+                greeting_sent["value"] = True
+                asyncio.create_task(initial_greeting())
+            else:
+                print(f"🎤 PARTICIPANT: Skipping greeting - alexa_mode: {current_mode['alexa']}, already_sent: {greeting_sent['value']}")
     
     ctx.room.on("participant_connected", on_participant_connected)
+    
+    print(f"🔍 STARTUP: Checking for existing participants...")
+    print(f"🔍 STARTUP: Remote participants count: {len(ctx.room.remote_participants)}")
+    print(f"🔍 STARTUP: Current mode alexa: {current_mode['alexa']}")
+    print(f"🔍 STARTUP: Greeting sent: {greeting_sent['value']}")
+    
+    # Also trigger greeting immediately if user is already connected
+    if current_mode["alexa"] and not greeting_sent["value"]:
+        # Check if there are already participants in the room
+        if len(ctx.room.remote_participants) > 0:
+            print("🎤 STARTUP: User already connected - triggering Alexa greeting")
+            greeting_sent["value"] = True
+            asyncio.create_task(initial_greeting())
+        else:
+            print("🎤 STARTUP: No participants yet, waiting for connection...")
+    else:
+        print(f"🎤 STARTUP: Not triggering greeting - alexa_mode: {current_mode['alexa']}, already_sent: {greeting_sent['value']}")
     
     # Keep the session running with avatar monitoring
     try:

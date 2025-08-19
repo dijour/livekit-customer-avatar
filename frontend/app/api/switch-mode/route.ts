@@ -1,27 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile } from "fs/promises";
-import { join } from "path";
 
 export async function POST(request: NextRequest) {
   try {
-    const { mode } = await request.json();
+    const { mode, roomName } = await request.json();
     
-    // Write mode to backend state file
-    const backendDir = join(process.cwd(), '..', 'backend');
-    const modeFilePath = join(backendDir, 'alexa_mode.txt');
+    if (!roomName) {
+      return NextResponse.json(
+        { success: false, error: 'Room name is required' },
+        { status: 400 }
+      );
+    }
     
-    await writeFile(modeFilePath, mode === 'avatar' ? 'false' : 'true', 'utf8');
-    
-    console.log(`Mode switched to: ${mode}`);
+    // Instead of writing to file, we'll return the mode for the frontend to send via room data
+    // The frontend will handle sending this to the agent via LiveKit room communication
+    console.log(`Mode switch requested: ${mode} for room: ${roomName}`);
     
     return NextResponse.json({ 
       success: true, 
-      message: `Mode switched to ${mode}` 
+      message: `Mode switch to ${mode} ready for room communication`,
+      mode,
+      roomName
     });
   } catch (error) {
-    console.error('Error switching mode:', error);
+    console.error('Error processing mode switch:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to switch mode' },
+      { success: false, error: 'Failed to process mode switch' },
       { status: 500 }
     );
   }

@@ -73,6 +73,9 @@ export default function Page() {
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
       
+      // Make room available globally for mode switching
+      (window as any).liveKitRoom = room;
+      
       // Register RPC methods for backend agent to call frontend functions
       room.registerRpcMethod('startCamera', async () => {
         console.log('🎥 Frontend RPC: startCamera called');

@@ -129,14 +129,26 @@ export function useAvatarSetup() {
     dispatch({ type: 'PHOTO_CAPTURED', payload: photoBlob });
     await createAvatar(photoBlob);
 
+    // Send mode switch message via LiveKit room data instead of API call
     try {
-      await fetch('/api/switch-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'avatar' })
-      });
+      // Get room context from window if available
+      const room = (window as any).liveKitRoom;
+      if (room && room.localParticipant) {
+        const modeMessage = {
+          action: 'switch_mode',
+          mode: 'avatar'
+        };
+        
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(JSON.stringify(modeMessage)),
+          { topic: 'mode_switch' }
+        );
+        console.log('📨 Sent mode switch message via room data:', modeMessage);
+      } else {
+        console.warn('⚠️ Room not available for mode switch message');
+      }
     } catch (error) {
-      console.error('Failed to switch mode:', error);
+      console.error('Failed to send mode switch message:', error);
     }
   }, [createAvatar]);
 
