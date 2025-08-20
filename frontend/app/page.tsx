@@ -117,6 +117,14 @@ export default function Page() {
         avatarSetup.handleSkipPhoto();
         return JSON.stringify("Photo skipped");
       });
+
+      room.registerRpcMethod('isCameraActive', async () => {
+        console.log('📷 RPC Method Called: isCameraActive');
+        // Check if camera is available and ready
+        const isActive = photoCaptureRef.current?.startCamera !== undefined;
+        console.log('📷 Camera active status:', isActive);
+        return isActive ? "true" : "false";
+      });
       
     } catch (error) {
       console.error("Failed to connect:", error);
@@ -404,6 +412,7 @@ export default function Page() {
           onResetExperience={handleResetExperience}
           showPhotoCaptureButton={showPhotoCaptureButton}
           avatarExists={!!avatarSetup.state.assetId}
+          onShowAlexaTransition={() => setShowAlexaTransition(true)}
         />
 
         {/* Error notification */}
@@ -436,6 +445,7 @@ function SimpleVoiceAssistant(props: {
   onResetExperience: () => Promise<void>;
   showPhotoCaptureButton: boolean;
   avatarExists: boolean;
+  onShowAlexaTransition: () => void;
 }) {
   const { state: agentState } = useVoiceAssistant();
   const { localParticipant } = useLocalParticipant();
@@ -526,7 +536,7 @@ function SimpleVoiceAssistant(props: {
               </div>
               {/* Right column - Photo capture controls */}
               <div className="flex-shrink-0">
-                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} />
+                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} onShowAlexaTransition={props.onShowAlexaTransition} />
               </div>
             </div>
             
@@ -567,7 +577,7 @@ function AgentVisualizer() {
 }
 
 
-function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean }) {
+function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists, onShowAlexaTransition }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean; onShowAlexaTransition: () => void }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
@@ -591,7 +601,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
     };
   }, []);
 
-  const handleStartCamera = useCallback(() => {
+  const handleStartCamera = useCallback(async () => {
     console.log('🎥 Frontend Button Clicked: startCamera called');
     console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
     console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
@@ -600,19 +610,36 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       console.log('🎥 Calling photoCaptureRef.current.startCamera()');
       photoCaptureRef.current.startCamera();
       console.log('🎥 startCamera() called successfully');
+      
+      // Inform backend about state change
+      const room = (window as { liveKitRoom?: Room }).liveKitRoom;
+      if (room) {
+        try {
+          await room.localParticipant.publishData(
+            new TextEncoder().encode(JSON.stringify({ action: "camera_started", timestamp: Date.now() })),
+            { topic: "user_state_change" }
+          );
+          console.log('📡 Sent camera_started state to backend');
+        } catch (error) {
+          console.error('Failed to send state change to backend:', error);
+        }
+      }
+      
       return JSON.stringify("Camera started");
     }
     console.log('🎥 ERROR: Photo capture component not available');
     return JSON.stringify("Camera component not available");
-    // photoCaptureRef.current?.startCamera();
-    // setIsStreaming(true);
   }, [photoCaptureRef]);
 
   const handleCapturePhoto = useCallback(() => {
-    photoCaptureRef.current?.capturePhoto();
-    setCapturedPhoto(true);
-    setIsStreaming(false);
-  }, [photoCaptureRef]);
+    if (photoCaptureRef.current?.capturePhoto) {
+      photoCaptureRef.current.capturePhoto();
+      // Show Alexa transition video during avatar generation (same as RPC method)
+      onShowAlexaTransition();
+      setCapturedPhoto(true);
+      setIsStreaming(false);
+    }
+  }, [photoCaptureRef, onShowAlexaTransition]);
 
   const retakePhoto = useCallback(() => {
     console.log("📸 PhotoCaptureControls: Calling PhotoCapture.retakePhoto");

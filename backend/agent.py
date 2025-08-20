@@ -114,12 +114,12 @@ class Config:
 # ---------------------------
 class Msg:
     ALEXA_GREETING = (
-        "Hello! I'm Alexa, and I'm here to help you create your personalized avatar. "
+        "Hey! I'm here to help you create your personalized avatar. "
         "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, say 'start camera'."
     )
 
     ALEXA_INSTRUCTIONS = (
-        "You are Alexa, Amazon's voice assistant. Help the user create a personalized avatar by guiding them through photo capture.\n"
+        "You are Alexa, Amazon's voice assistant. Do not announce yourself as Alexa. Help the user create a personalized avatar by guiding them through photo capture.\n"
         "- Guide the user through taking a photo (start camera → take photo)\n"
         "- Be encouraging and natural\n"
         "Start by greeting them and explaining the process. Ask them to say 'start camera' when ready."
@@ -227,15 +227,22 @@ class VoiceCloner:
             and not self.voice_created
             and self.accumulated_secs >= self.cfg.target_consolidation_secs
         ):
-            vid = await self._create_clone(trim_to_target=True, label_prefix="User Voice Clone")
-            if vid:
-                self.voice_created = True  # Mark as created to prevent more clones
-                # store in participant metadata for later use by frontend/switcher
-                try:
-                    await self.room.local_participant.set_metadata(json.dumps({"customVoiceId": vid}))
-                    print(f"🔖 Stored customVoiceId in room metadata: {vid}")
-                except Exception as e:
-                    print(f"⚠️ set_metadata failed: {e}")
+            try:
+                vid = await self._create_clone(trim_to_target=True, label_prefix="User Voice Clone")
+                if vid and vid != self.cfg.avatar_voice_id:  # Only if we got a real clone
+                    self.voice_created = True  # Mark as created to prevent more clones
+                    # store in participant metadata for later use by frontend/switcher
+                    try:
+                        await self.room.local_participant.set_metadata(json.dumps({"customVoiceId": vid}))
+                        print(f"🔖 Stored customVoiceId in room metadata: {vid}")
+                    except Exception as e:
+                        print(f"⚠️ set_metadata failed: {e}")
+                else:
+                    print("⚠️ Voice cloning failed, continuing with default voice")
+                    self.voice_created = True  # Still mark as attempted to prevent retries
+            except Exception as e:
+                print(f"⚠️ Voice cloning error (non-blocking): {e}")
+                self.voice_created = True  # Mark as attempted to prevent retries
             return path
 
         return path
@@ -261,8 +268,8 @@ class VoiceCloner:
 
             self.clone_count += 1
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = f"{label_prefix} {self.clone_count:03d} ({ts})"
-            print(f"🚀 ElevenLabs cloning: {name}")
+            name = f"{label_prefix} ({ts})"
+            print(f"🚀 ElevenLabs creating voice: {name}")
 
             voice = self.client.voices.ivc.create(name=name, files=[buf])
             vid = voice.voice_id
@@ -278,16 +285,16 @@ class VoiceCloner:
         except Exception as e:
             em = str(e)
             if "missing_permissions" in em and "voices_write" in em:
-                print("❌ ElevenLabs permission error: requires voices_write (Starter+ plan)")
+                print("⚠️ ElevenLabs permission error: requires voices_write (Starter+ plan). Using default voice.")
             elif "401" in em:
-                print("❌ ElevenLabs auth error: invalid/expired ELEVEN_API_KEY")
+                print("⚠️ ElevenLabs auth error: invalid/expired ELEVEN_API_KEY. Using default voice.")
             elif "voice_limit_reached" in em:
-                print("❌ ElevenLabs voice limit reached (30/30). Using default avatar voice instead.")
-                # Continue with default voice instead of failing
-                return self.cfg.avatar_voice_id
+                print("⚠️ ElevenLabs voice limit reached (30/30). Using default avatar voice instead.")
             else:
-                print(f"❌ ElevenLabs clone error: {em}")
-            return None
+                print(f"⚠️ ElevenLabs clone error: {em}. Using default voice.")
+            
+            # Always return default voice instead of None to prevent blocking avatar creation
+            return self.cfg.avatar_voice_id
 
     async def cleanup_voices(self) -> None:
         """Delete all created voice clones from ElevenLabs"""
@@ -310,11 +317,12 @@ class VoiceCloner:
 # Agent with function tools & custom STT node
 # ---------------------------
 class Assistant(Agent):
-    def __init__(self, cfg: Config, is_alexa: bool, room: rtc.Room, cloner: Optional[VoiceCloner]):
+    def __init__(self, cfg: Config, is_alexa: bool, room: rtc.Room, cloner: Optional[VoiceCloner], orchestrator):
         self.cfg = cfg
         self.is_alexa = is_alexa
         self.room = room
         self.cloner = cloner
+        self.orchestrator = orchestrator  # reference to orchestrator for state access
         super().__init__(instructions=Msg.ALEXA_INSTRUCTIONS if is_alexa else Msg.AVATAR_INSTRUCTIONS)
 
     # ---- Function Tools ----
@@ -322,10 +330,15 @@ class Assistant(Agent):
     async def start_camera(self, context: RunContext) -> str:
         """Activate the user's camera for photo capture (triggered by 'start camera')."""
         try:
+            # Check if camera is already started
+            if self.orchestrator.camera_started:
+                return "I can see your camera is already active! You look great. Say 'take photo' when you're ready to capture."
+            
             pid = await _get_first_remote_participant(self.room)
             if not pid:
                 return "I don't see you connected yet. Once you're in the room, say 'start camera' again."
             await _rpc_frontend(self.room, pid, method="startCamera")
+            self.orchestrator.camera_started = True
             return "Great! Say 'take photo' whenever you're ready to capture."
         except Exception as e:
             return f"I couldn't start the camera: {e}"
@@ -334,15 +347,41 @@ class Assistant(Agent):
     async def take_photo(self, context: RunContext) -> str:
         """Capture a photo for the user's avatar (triggered by 'take photo')."""
         try:
+            # Check if camera is started first - be more permissive and check multiple sources
+            camera_ready = (
+                self.orchestrator.camera_started or  # Backend tracked state
+                await self._is_camera_active_via_frontend()  # Check frontend directly
+            )
+            
+            if not camera_ready:
+                return "Let's start your camera first! Please say 'start camera' or click the Start Camera button."
+            
             pid = await _get_first_remote_participant(self.room)
             if not pid:
                 return "You're not connected yet. Join the room and try 'take photo' again."
             await _rpc_frontend(self.room, pid, method="capturePhoto")
+            
+            # Start monitoring for avatar creation completion to trigger mode switch
+            asyncio.create_task(self.orchestrator._monitor_avatar_creation())
+            
             return (
                 "Perfect! I've captured your photo. I'll start creating your avatar now."
             )
         except Exception as e:
             return f"I couldn't take the photo: {e}"
+    
+    async def _is_camera_active_via_frontend(self) -> bool:
+        """Check if camera is active by querying frontend directly"""
+        try:
+            pid = await _get_first_remote_participant(self.room)
+            if not pid:
+                return False
+            
+            # Send RPC to check camera state
+            result = await _rpc_frontend(self.room, pid, method="isCameraActive")
+            return result == "true"
+        except Exception:
+            return False  # Assume not active if we can't check
 
     @function_tool()
     async def skip_photo(self, context: RunContext) -> str:
@@ -378,12 +417,14 @@ class Assistant(Agent):
 
         async for ev in Agent.default.stt_node(self, _tap_and_forward(), model_settings):
             if ev.type == stt.SpeechEventType.START_OF_SPEECH:
-                speech_started = True
-                speech_id = datetime.now().strftime("%H%M%S")
-                current_frames = []
-                print(f"🎙️ Recording speech {speech_id}…")
+                # Only start recording if we're still in Alexa mode (before avatar creation)
+                if self.orchestrator.current_mode_is_alexa:
+                    speech_started = True
+                    speech_id = datetime.now().strftime("%H%M%S")
+                    current_frames = []
+                    print(f"🎙️ Recording speech {speech_id}…")
             elif ev.type == stt.SpeechEventType.END_OF_SPEECH:
-                if speech_started and current_frames:
+                if speech_started and current_frames and self.orchestrator.current_mode_is_alexa:
                     await self.cloner.save_frames(current_frames, speech_id)
                     # Instant cloning disabled - only create one voice per session
                 speech_started = False
@@ -403,6 +444,8 @@ class Orchestrator:
         self.avatar: Optional[hedra.AvatarSession] = None
         self.cloner: Optional[VoiceCloner] = None
         self.current_mode_is_alexa = True  # start in Alexa mode
+        self.camera_started = False  # track camera state
+        self._cleanup_registered = False  # track if cleanup is registered
 
     # ---- Session setup ----
     async def start(self) -> None:
@@ -422,7 +465,7 @@ class Orchestrator:
         self.cloner = VoiceCloner(self.cfg, self.ctx.room)
 
         # Agent
-        agent = Assistant(cfg=self.cfg, is_alexa=True, room=self.ctx.room, cloner=self.cloner)
+        agent = Assistant(cfg=self.cfg, is_alexa=True, room=self.ctx.room, cloner=self.cloner, orchestrator=self)
 
         await self.session.start(
             room=self.ctx.room,
@@ -439,10 +482,42 @@ class Orchestrator:
             asyncio.create_task(self._alexa_greeting())
 
         # Start polling avatar-state (if requests available)
-        if REQUESTS_AVAILABLE:
-            asyncio.create_task(self._poll_avatar_state())
-        else:
-            print("ℹ️ 'requests' not available, skipping avatar-state polling")
+        asyncio.create_task(self._poll_avatar_state())
+        
+        # Register cleanup handler
+        self._register_cleanup()
+    
+    def _register_cleanup(self) -> None:
+        """Register cleanup handler for when agent shuts down"""
+        if self._cleanup_registered:
+            return
+        
+        import signal
+        import atexit
+        
+        def cleanup_handler():
+            print("🧹 Agent shutting down, cleaning up voices...")
+            if self.cloner:
+                # Run cleanup synchronously since we're in shutdown
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create a task if loop is running
+                        asyncio.create_task(self.cloner.cleanup_voices())
+                    else:
+                        # Run directly if loop is not running
+                        loop.run_until_complete(self.cloner.cleanup_voices())
+                except Exception as e:
+                    print(f"⚠️ Cleanup error: {e}")
+        
+        # Register for both normal exit and signal termination
+        atexit.register(cleanup_handler)
+        signal.signal(signal.SIGTERM, lambda s, f: cleanup_handler())
+        signal.signal(signal.SIGINT, lambda s, f: cleanup_handler())
+        
+        self._cleanup_registered = True
+        print("🧹 Voice cleanup handler registered")
 
     # ---- Event wiring ----
     def _wire_events(self) -> None:
@@ -492,6 +567,18 @@ class Orchestrator:
                         print(f"🎭 Received avatar ID via avatar_data: {avatar_id}")
                         # Store immediately without waiting for mode switch
                         asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
+                elif pkt.topic == "user_state_change":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    action = message.get("action")
+                    timestamp = message.get("timestamp")
+                    print(f"📱 User state change: {action} at {timestamp}")
+                    
+                    if action == "camera_started":
+                        print("📷 Backend received: User started camera via button")
+                        # Track camera state
+                        self.camera_started = True
+                        # Agent now knows user has progressed to camera state
+                        asyncio.create_task(self._handle_camera_started())
             except Exception as e:
                 print(f"❌ data_received error: {e}")
 
@@ -522,6 +609,51 @@ class Orchestrator:
         except Exception as e:
             print(f"❌ store_and_switch_mode error: {e}")
 
+    async def _handle_camera_started(self) -> None:
+        """Handle when user starts camera via button click"""
+        try:
+            if self.current_mode_is_alexa:
+                # Just log the state change, don't generate a response
+                # The agent will respond appropriately when user speaks next
+                print("📷 Camera started via button - state tracked, ready for voice commands")
+        except Exception as e:
+            print(f"❌ _handle_camera_started error: {e}")
+
+    async def _monitor_avatar_creation(self) -> None:
+        """Monitor for avatar creation completion and trigger mode switch"""
+        try:
+            if not self.current_mode_is_alexa:
+                print("🔍 Avatar mode already active, skipping monitoring")
+                return
+                
+            print("🔍 Monitoring for avatar creation completion...")
+            max_attempts = 30  # 30 seconds max wait
+            attempt = 0
+            
+            while attempt < max_attempts and self.current_mode_is_alexa:
+                await asyncio.sleep(1)
+                attempt += 1
+                
+                # Check if avatar ID is available from polling state
+                avatar_id = self._get_avatar_id_from_polling_state()
+                if avatar_id:
+                    print(f"✅ Avatar creation detected! Avatar ID: {avatar_id}")
+                    # Trigger mode switch to avatar mode
+                    await self._switch_mode("avatar")
+                    return
+                
+                # Also check room metadata
+                avatar_id = self._get_avatar_id_from_room()
+                if avatar_id:
+                    print(f"✅ Avatar creation detected in room metadata! Avatar ID: {avatar_id}")
+                    await self._switch_mode("avatar")
+                    return
+            
+            if self.current_mode_is_alexa:
+                print("⚠️ Avatar creation monitoring timed out after 30 seconds")
+        except Exception as e:
+            print(f"❌ _monitor_avatar_creation error: {e}")
+
     # ---- Greetings ----
     async def _alexa_greeting(self) -> None:
         try:
@@ -534,10 +666,24 @@ class Orchestrator:
     async def _switch_mode(self, new_mode: str) -> None:
         try:
             if new_mode == "avatar":
+                if not self.current_mode_is_alexa:
+                    print("🎭 Avatar mode already active, skipping switch")
+                    return
+                    
                 print("🎭 Switching → Avatar mode")
                 self.current_mode_is_alexa = False
+                
+                # Use custom voice if available, otherwise default avatar voice
+                custom_voice_id = self._get_custom_voice_id_from_local()
+                voice_id = custom_voice_id or self.cfg.avatar_voice_id
+                
+                if custom_voice_id:
+                    print(f"🎤 Using custom voice clone: {custom_voice_id}")
+                else:
+                    print(f"🎤 Using default avatar voice: {voice_id}")
+                
                 self.session._tts = elevenlabs.TTS(
-                    voice_id=self.cfg.avatar_voice_id, model=self.cfg.eleven_tts_model
+                    voice_id=voice_id, model=self.cfg.eleven_tts_model
                 )
 
                 if not self.avatar:
@@ -630,10 +776,11 @@ class Orchestrator:
                     state = resp.json() or {}
                     if state != last_state:
                         last_state = state
-                        if state.get("switchVoice"):
+                        if state.get("switchVoice") and self.current_mode_is_alexa:
                             # Prefer custom voice id from local participant metadata
                             voice_id = self._get_custom_voice_id_from_local() or self.cfg.avatar_voice_id
                             print(f"🎭 Switching TTS to voice_id={voice_id}")
+                            self.current_mode_is_alexa = False
                             self.session._tts = elevenlabs.TTS(
                                 voice_id=voice_id, model=self.cfg.eleven_tts_model
                             )
