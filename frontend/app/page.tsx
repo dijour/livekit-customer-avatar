@@ -3,8 +3,10 @@
 import { NoAgentNotification } from "@components/NoAgentNotification";
 import TranscriptionView from "@components/TranscriptionView";
 import PhotoCapture, { PhotoCaptureRef } from "@components/PhotoCapture";
-import { CaptionIcon, CaptionOffIcon, MicrophoneOnIcon, MicrophoneOffIcon, XmarkIcon } from '../components/icons';
+import { CaptionIcon, CaptionOffIcon, MicrophoneOnIcon, MicrophoneOffIcon, XmarkIcon, BrowseIcon, PreferencesIcon, ChevronIcon } from '../components/icons';
 import { Button } from '../components/Button';
+import { Toggle } from '../components/Toggle';
+import { Popover } from '../components/Popover';
 import { MaskedMediaView } from "@components/MaskedMediaView";
 import { useAvatarSetup } from "../hooks/useAvatarSetup";
 import {
@@ -34,7 +36,7 @@ export default function Page() {
   const onConnectButtonClicked = useCallback(async () => {
     try {
       setIsAutoConnecting(true);
-      
+
       // Generate room connection details, including:
       //   - A random Room name
       //   - A random Participant name
@@ -48,10 +50,10 @@ export default function Page() {
         process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
         window.location.origin
       );
-      
+
       // Use asset ID from avatar setup state
       const assetId = avatarSetup.state.assetId || localStorage.getItem("hedraAssetId");
-      
+
       let response;
       if (assetId) {
         // Send asset ID via POST request
@@ -66,31 +68,31 @@ export default function Page() {
         // Use GET request if no asset ID (Alexa mode)
         response = await fetch(url.toString());
       }
-      
+
       const connectionDetailsData: ConnectionDetails = await response.json();
       console.log("Connection details:", connectionDetailsData);
-      
+
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
-      
+
       // Make room available globally for mode switching
       (window as any).liveKitRoom = room;
-      
+
       // Register RPC methods for backend agent to call frontend functions
       room.registerRpcMethod('startCamera', async () => {
         console.log('🎥 Frontend RPC: startCamera called');
-        
+
         // Photo capture UI should now always be available when no avatar exists
         console.log('🎥 Avatar exists:', !!avatarSetup.state.assetId);
-        
+
         // Wait a moment for component to be ready if needed
         if (!photoCaptureRef.current) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        
+
         console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
         console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
-        
+
         if (photoCaptureRef.current?.startCamera) {
           console.log('🎥 Calling photoCaptureRef.current.startCamera()');
           photoCaptureRef.current.startCamera();
@@ -100,7 +102,7 @@ export default function Page() {
         console.log('🎥 ERROR: Photo capture component not available');
         return JSON.stringify("Camera component not available");
       });
-      
+
       room.registerRpcMethod('capturePhoto', async () => {
         console.log('RPC: capturePhoto called');
         if (photoCaptureRef.current?.capturePhoto) {
@@ -111,13 +113,13 @@ export default function Page() {
         }
         return JSON.stringify("Photo capture component not available");
       });
-      
+
       room.registerRpcMethod('skipPhoto', async () => {
         console.log('RPC: skipPhoto called');
         avatarSetup.handleSkipPhoto();
         return JSON.stringify("Photo skipped");
       });
-      
+
     } catch (error) {
       console.error("Failed to connect:", error);
       setIsAutoConnecting(false);
@@ -126,10 +128,10 @@ export default function Page() {
 
   // Monitor avatar creation and trigger phase transition
   useEffect(() => {
-    console.log('🎭 Avatar state check:', { 
-      showAlexaTransition, 
-      assetId: avatarSetup.state.assetId, 
-      showAvatarAppears 
+    console.log('🎭 Avatar state check:', {
+      showAlexaTransition,
+      assetId: avatarSetup.state.assetId,
+      showAvatarAppears
     });
     if (showAlexaTransition && avatarSetup.state.assetId && !showAvatarAppears) {
       console.log('🎭 Avatar ready! Triggering avatar appears video');
@@ -142,16 +144,16 @@ export default function Page() {
   // Handle data messages from backend agent for frontend control
   useEffect(() => {
     const handleDataReceived = (
-      payload: Uint8Array, 
-      participant?: RemoteParticipant, 
-      kind?: DataPacket_Kind, 
+      payload: Uint8Array,
+      participant?: RemoteParticipant,
+      kind?: DataPacket_Kind,
       topic?: string
     ) => {
       if (topic === "frontend_control") {
         try {
           const message = JSON.parse(new TextDecoder().decode(payload));
           console.log("Received frontend control message:", message);
-          
+
           switch (message.action) {
             case "show_photo_capture":
               // Force show photo capture UI
@@ -162,21 +164,21 @@ export default function Page() {
                 setShowPhotoCaptureButton(true);
               }, 100);
               break;
-              
+
             case "start_camera":
               // Start camera if photo capture component is available
               if (photoCaptureRef.current?.startCamera) {
                 photoCaptureRef.current.startCamera();
               }
               break;
-              
+
             case "capture_photo":
               // Capture photo if photo capture component is available
               if (photoCaptureRef.current?.capturePhoto) {
                 photoCaptureRef.current.capturePhoto();
               }
               break;
-              
+
             case "skip_photo":
               // Skip photo capture
               avatarSetup.handleSkipPhoto();
@@ -203,14 +205,14 @@ export default function Page() {
         console.log('🧹 Clearing existing room participants from previous session');
         room.remoteParticipants.clear();
       }
-      
+
       // Clear room metadata to prevent avatar mode persistence
       if (room.metadata) {
         console.log('🧹 Clearing room metadata from previous session');
         // Clear metadata by setting it to empty via setMetadata
         room.localParticipant.setMetadata('');
       }
-      
+
       // Clear avatar state from API endpoint on session start
       try {
         await fetch('/api/clear-avatar-state', { method: 'POST' });
@@ -219,7 +221,7 @@ export default function Page() {
         console.error('Failed to clear avatar state on session start:', error);
       }
     };
-    
+
     clearSessionState();
   }, [room]);
 
@@ -239,33 +241,33 @@ export default function Page() {
     if (room.state === 'connected') {
       await room.disconnect();
     }
-    
+
     // Clear any lingering room participants or agents
     room.remoteParticipants.clear();
-    
+
     // Clear room metadata to ensure fresh start
     if (room.metadata) {
       room.localParticipant.setMetadata('');
     }
-    
+
     // Reset all states
     setHasUserInteracted(false);
     setIsAutoConnecting(false);
     setIsSimulation(false);
-    
+
     // Reset avatar setup
     avatarSetup.reset();
-    
+
     // Clear localStorage
     localStorage.removeItem("hedraAssetId");
-    
+
     // Reset voice state on backend
     try {
       await fetch('/api/reset-voice-state', { method: 'POST' });
     } catch (error) {
       console.error('Failed to reset voice state:', error);
     }
-    
+
     // Clear avatar state from API endpoint
     try {
       await fetch('/api/clear-avatar-state', { method: 'POST' });
@@ -287,16 +289,16 @@ export default function Page() {
   // Show start experience button if user hasn't interacted yet
   if (!hasUserInteracted) {
     return (
-      <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-screen bg-[#0E1A27] flex flex-col items-center justify-center">
+      <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="h-screen bg-[#0E1A27] flex flex-col items-center justify-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center max-w-md mx-auto px-6"
         >
-          
+
           <Button onClick={handleStartExperience}>Start</Button>
-          
-          <motion.p 
+
+          <motion.p
             className="text-sm text-white/60 mt-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -311,14 +313,14 @@ export default function Page() {
 
   return (
     // anchor
-    <main data-lk-theme="default" style={{fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center'}} className="h-screen bg-[#0E1A27] flex flex-col">
+    <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="h-screen bg-[#0E1A27] flex flex-col">
       <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
 
-        
+
         {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
         <AnimatePresence mode="wait">
           {(!avatarSetup.state.assetId || avatarSetup.showPhotoCapture) && (
-            <PhotoCapture 
+            <PhotoCapture
               key="photo-capture"
               ref={photoCaptureRef}
               onPhotoCapture={avatarSetup.handlePhotoCapture}
@@ -427,7 +429,7 @@ export default function Page() {
   );
 }
 
-function SimpleVoiceAssistant(props: { 
+function SimpleVoiceAssistant(props: {
   onConnectButtonClicked: () => void;
   isSimulation: boolean;
   setIsSimulation: (value: boolean) => void;
@@ -471,28 +473,28 @@ function SimpleVoiceAssistant(props: {
                 <AgentVisualizer />
               </motion.div>
             </div>
-            
+
             {/* Photo capture top control bar */}
             <div className="fixed top-0 left-0 right-0 z-40">
               <div className="relative px-[48px] py-[36px]">
                 {/* Left circular button */}
                 <div className="absolute left-[48px] top-[36px]">
-                  <button 
+                  <button
                     onClick={props.onResetExperience}
                     className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
                   >
                     <XmarkIcon size={36} className="text-white" />
                   </button>
                 </div>
-                
+
                 {/* Center status text - horizontally centered, vertically aligned with buttons */}
                 {/* <div className="absolute left-1/2 top-[36px] -translate-x-1/2 h-[72px] flex items-center text-white text-[24px] whitespace-nowrap">
                   <PhotoCaptureStatus />
                 </div> */}
-                
+
                 {/* Right buttons */}
-                <div className="absolute right-[48px] top-[36px] flex gap-4"> 
-                  <button 
+                <div className="absolute right-[48px] top-[36px] flex gap-4">
+                  <button
                     onClick={toggleCaptions}
                     className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
                   >
@@ -502,7 +504,7 @@ function SimpleVoiceAssistant(props: {
                       <CaptionIcon size={36} className="text-white" />
                     )}
                   </button>
-                  <button 
+                  <button
                     onClick={toggleMicrophone}
                     className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
                   >
@@ -524,12 +526,20 @@ function SimpleVoiceAssistant(props: {
                   <TranscriptionView />
                 )}
               </div>
+
+              {/* Center column - Avatar visual editing controls (only when avatar exists and is visible) */}
+              {props.avatarExists && (
+                <div className="flex-shrink-0">
+                  <AvatarVisualControls />
+                </div>
+              )}
+
               {/* Right column - Photo capture controls */}
               <div className="flex-shrink-0">
                 <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} />
               </div>
             </div>
-            
+
             <RoomAudioRenderer />
             <NoAgentNotification state={agentState} />
           </>
@@ -567,12 +577,182 @@ function AgentVisualizer() {
 }
 
 
+function AvatarVisualControls() {
+  const [personalityEnabled, setPersonalityEnabled] = useState(false);
+  const [filtersEnabled, setFiltersEnabled] = useState(false);
+  const [currentPersonalityIndex, setCurrentPersonalityIndex] = useState(0);
+  const personalityRef = useRef<HTMLButtonElement>(null);
+  const filtersRef = useRef<HTMLButtonElement>(null);
+
+  // Personality carousel data
+  const personalities = [
+    { name: "Core", subtitle: "The Alexa you know and love.", media: "/videos/heart.mp4" }, //heart
+    { name: "Minimalist", subtitle: "Adequate. Your primary question or topic for today's discussion?", media: "/videos/check.mp4" }, //checkmark
+    { name: "Supporter", subtitle: "Living my best life cheering on amazing people like YOU! Keep shining.", media: "/videos/flower.mp4" }, //actual flowers
+    { name: "Free Spirit", subtitle: "All good vibes here, dude. Taking it easy as usual.", media: "/videos/clouds.mp4" }, //clouds
+    { name: "Dreamer", subtitle: "My spirit is doing cartwheels through the universe.", media: "/videos/star.mp4" }, //star
+    { name: "Rockstar", subtitle: "Living so legendarily right now that even my haters are taking notes.", media: "/videos/fireworks.mp4" }, //flowers?
+
+  ];
+
+  const handlePersonalityToggle = useCallback((toggled: boolean) => {
+    setPersonalityEnabled(toggled);
+    console.log('Personality:', toggled ? 'enabled' : 'disabled');
+  }, []);
+
+  const handleFiltersToggle = useCallback((toggled: boolean) => {
+    setFiltersEnabled(toggled);
+    console.log('Filters:', toggled ? 'enabled' : 'disabled');
+  }, []);
+
+  const closePersonalityPopover = useCallback(() => {
+    setPersonalityEnabled(false);
+  }, []);
+
+  const closeFiltersPopover = useCallback(() => {
+    setFiltersEnabled(false);
+  }, []);
+
+  // Carousel navigation functions
+  const goToPreviousPersonality = useCallback(() => {
+    setCurrentPersonalityIndex((prev) =>
+      prev === 0 ? personalities.length - 1 : prev - 1
+    );
+  }, [personalities.length]);
+
+  const goToNextPersonality = useCallback(() => {
+    setCurrentPersonalityIndex((prev) =>
+      (prev + 1) % personalities.length
+    );
+  }, [personalities.length]);
+
+  const currentPersonality = personalities[currentPersonalityIndex];
+
+  return (
+    <div className="flex gap-4 relative">
+      <div className="relative">
+        <Toggle
+          ref={personalityRef}
+          isToggled={personalityEnabled}
+          onToggle={handlePersonalityToggle}
+          icon={<BrowseIcon size={32} />}
+        >
+          Personality
+        </Toggle>
+        <Popover
+          width={380}
+          align="center"
+          isOpen={personalityEnabled}
+          onClose={closePersonalityPopover}
+          triggerRef={personalityRef}
+        >
+          <div className="relative w-full h-[420px]">
+            <motion.div
+              key={currentPersonalityIndex}
+
+              className="relative w-full h-full flex flex-col justify-center items-center"
+            >
+              {/* Background Video */}
+              {currentPersonality.media.endsWith('.mp4') ? (
+                <video
+                  className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
+                  src={currentPersonality.media}
+                  autoPlay
+                  loop
+                  muted
+                />
+              ) : (
+                <img
+                  className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
+                  src={currentPersonality.media}
+                />
+              )}
+
+              {/* Dark overlay for text readability */}
+              {/* <div className="absolute inset-0 bg-black/40 rounded-[36px]"></div> */}
+
+              {/* Content overlay */}
+              <motion.div
+                className="absolute bottom-0 left-0 right-0 z-10 flex flex-col justify-end items-center text-center px-12 pb-6"
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              >
+                <div className="text-white text-xl font-bold leading-8 mb-1 drop-shadow-lg">{currentPersonality.name}</div>
+                <div className="text-white/50 text-base font-normal leading-6 max-w-xs drop-shadow-md">
+                  {currentPersonality.subtitle}
+                </div>
+                <motion.button
+                  onClick={goToPreviousPersonality}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
+
+                  transition={{ duration: 0.1 }}
+                  style={{ transformOrigin: 'center' }}
+                >
+                  <ChevronIcon size={32} />
+                </motion.button>
+
+                <motion.button
+                  onClick={goToNextPersonality}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
+
+                  transition={{ duration: 0.1 }}
+                  style={{ transformOrigin: 'center' }}
+                >
+                  <ChevronIcon size={32} className="rotate-180" />
+                </motion.button>
+              </motion.div>
+            </motion.div>
+
+            {/* Navigation arrows positioned absolutely */}
+
+          </div>
+        </Popover>
+      </div>
+
+      <div className="relative">
+        <Toggle
+
+          ref={filtersRef}
+          isToggled={filtersEnabled}
+          onToggle={handleFiltersToggle}
+          icon={<PreferencesIcon size={32} />}
+        >
+          Filters
+        </Toggle>
+        <Popover
+          width={300}
+          align="right"
+          isOpen={filtersEnabled}
+          onClose={closeFiltersPopover}
+          triggerRef={filtersRef}
+        >
+          <div className="w-full flex flex-col justify-center items-center overflow-hidden rounded-[36px]">
+            <div className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]">
+              <div className="justify-start text-white text-xl font-normal leading-7">Add a funny hat</div>
+            </div>
+            <div className="w-full h-px relative bg-neutral-100/10"></div>
+            <div className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer">
+              <div className="justify-start text-white text-xl font-normal leading-7">Make me Pixar style</div>
+            </div>
+            <div className="w-full h-px relative bg-neutral-100/10"></div>
+            <div className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]">
+              <div className="justify-start text-white text-xl font-normal leading-7">Give me studio lighting</div>
+            </div>
+          </div>
+        </Popover>
+      </div>
+    </div>
+  );
+}
+
 function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
   const [error] = useState<string | null>(null);
-  
+
   // Feature flag: enable full workflow only if URL contains #modify
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
 
@@ -595,7 +775,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
     console.log('🎥 Frontend Button Clicked: startCamera called');
     console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
     console.log('🎥 photoCaptureRef.current?.startCamera:', photoCaptureRef.current?.startCamera);
-    
+
     if (photoCaptureRef.current?.startCamera) {
       console.log('🎥 Calling photoCaptureRef.current.startCamera()');
       photoCaptureRef.current.startCamera();
