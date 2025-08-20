@@ -83,7 +83,7 @@ class Config:
     deepgram_model: str = os.getenv("DEEPGRAM_MODEL", "nova-3")
 
     # Voice clone settings
-    target_consolidation_secs: float = float(os.getenv("VOICE_CONSOLIDATION_SECS", 10))
+    target_consolidation_secs: float = float(os.getenv("VOICE_CONSOLIDATION_SECS", 5))
     instant_clone_min_secs: float = float(os.getenv("INSTANT_CLONE_MIN_SECS", 3))
 
     # API for avatar state polling - dynamic based on environment
@@ -160,6 +160,8 @@ class VoiceCloner:
         self.voice_accumulator: List[AudioSegment] = []
         self.accumulated_secs: float = 0.0
         self.clone_count: int = 0
+        self.created_voice_ids: List[str] = []  # Track created voice IDs for cleanup
+        self.voice_created: bool = False  # Only create one voice per session
 
         self.client = None
         if ELEVENLABS_AVAILABLE:
@@ -219,13 +221,15 @@ class VoiceCloner:
             f"🎛️ Accumulated {self.accumulated_secs:.1f}/{self.cfg.target_consolidation_secs:.0f}s"
         )
 
-        # Try full clone when ready
+        # Try full clone when ready (only once per session)
         if (
             self.client
+            and not self.voice_created
             and self.accumulated_secs >= self.cfg.target_consolidation_secs
         ):
             vid = await self._create_clone(trim_to_target=True, label_prefix="User Voice Clone")
             if vid:
+                self.voice_created = True  # Mark as created to prevent more clones
                 # store in participant metadata for later use by frontend/switcher
                 try:
                     await self.room.local_participant.set_metadata(json.dumps({"customVoiceId": vid}))
@@ -237,11 +241,8 @@ class VoiceCloner:
         return path
 
     async def instant_clone_if_ready(self) -> Optional[str]:
-        if not (self.client and self.voice_accumulator):
-            return None
-        if self.accumulated_secs < self.cfg.instant_clone_min_secs:
-            return None
-        return await self._create_clone(trim_to_target=False, label_prefix="Instant User Clone")
+        # Disabled - only create one voice per session via save_frames
+        return None
 
     async def _create_clone(self, *, trim_to_target: bool, label_prefix: str) -> Optional[str]:
         # Combine in-memory segments
@@ -265,12 +266,14 @@ class VoiceCloner:
 
             voice = self.client.voices.ivc.create(name=name, files=[buf])
             vid = voice.voice_id
+            self.created_voice_ids.append(vid)  # Track for cleanup
             print(f"🎉 Clone ready: {vid} ({len(combined)/1000:.1f}s)")
 
             if trim_to_target:
-                # Reset once full clone completed, keep buffer otherwise
+                # Reset once full clone completed
                 self.voice_accumulator.clear()
                 self.accumulated_secs = 0.0
+                print(f"🎉 Voice clone session complete - no more clones will be created")
             return vid
         except Exception as e:
             em = str(e)
@@ -285,6 +288,22 @@ class VoiceCloner:
             else:
                 print(f"❌ ElevenLabs clone error: {em}")
             return None
+
+    async def cleanup_voices(self) -> None:
+        """Delete all created voice clones from ElevenLabs"""
+        if not (self.client and self.created_voice_ids):
+            return
+        
+        print(f"🧹 Cleaning up {len(self.created_voice_ids)} voice clones...")
+        for voice_id in self.created_voice_ids:
+            try:
+                self.client.voices.delete(voice_id=voice_id)
+                print(f"🗑️ Deleted voice clone: {voice_id}")
+            except Exception as e:
+                print(f"⚠️ Failed to delete voice {voice_id}: {e}")
+        
+        self.created_voice_ids.clear()
+        print("✅ Voice cleanup completed")
 
 
 # ---------------------------
@@ -366,8 +385,7 @@ class Assistant(Agent):
             elif ev.type == stt.SpeechEventType.END_OF_SPEECH:
                 if speech_started and current_frames:
                     await self.cloner.save_frames(current_frames, speech_id)
-                    # Optionally attempt instant clone early
-                    await self.cloner.instant_clone_if_ready()
+                    # Instant cloning disabled - only create one voice per session
                 speech_started = False
                 current_frames = []
                 speech_id = None
@@ -661,7 +679,15 @@ async def show_photo_capture_ui(ctx: JobContext) -> str:
 async def entrypoint(ctx: JobContext):
     orch = Orchestrator(ctx, Config())
     await orch.start()
-    # Keep alive forever
+    async def async_shutdown_callback(participant: rtc.Participant):
+        print("Shutting down...")
+        if orch.cloner:
+            await orch.cloner.cleanup_voices()
+    
+    def shutdown_callback(participant: rtc.Participant):
+        asyncio.create_task(async_shutdown_callback(participant))
+    
+    ctx.room.on("participant_disconnected", shutdown_callback)
     while True:
         await asyncio.sleep(3600)
 
