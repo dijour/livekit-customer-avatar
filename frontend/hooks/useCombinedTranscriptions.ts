@@ -8,7 +8,7 @@ export default function useCombinedTranscriptions() {
   const micTrackRef = useLocalMicTrack();
   const { segments: userTranscriptions } = useTrackTranscription(micTrackRef);
 
-  const combinedTranscriptions = useMemo(() => {
+  const combinedTranscriptions = useMemo(() => { 
     return [
       ...agentTranscriptions.map((val) => {
         return { ...val, role: "assistant" };

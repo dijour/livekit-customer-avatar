@@ -153,9 +153,10 @@ async def _rpc_frontend(room: rtc.Room, participant_id: str, method: str, payloa
 # Voice cloning
 # ---------------------------
 class VoiceCloner:
-    def __init__(self, cfg: Config, room: rtc.Room):
+    def __init__(self, cfg: Config, room: rtc.Room, orchestrator=None):
         self.cfg = cfg
         self.room = room
+        self.orchestrator = orchestrator
 
         self.voice_accumulator: List[AudioSegment] = []
         self.accumulated_secs: float = 0.0
@@ -166,21 +167,10 @@ class VoiceCloner:
         self.clone_creation_future: Optional[asyncio.Future] = None  # Future for clone creation
 
         self.client = None
-        if ELEVENLABS_AVAILABLE:
-            api_key = os.getenv("ELEVEN_API_KEY")
-            if api_key:
-                try:
-                    self.client = ElevenLabs(api_key=api_key)
-                    print("🎤 ElevenLabs client initialized")
-                except Exception as e:  # pragma: no cover
-                    print(f"⚠️ ElevenLabs init failed: {e}")
-            else:
-                print("⚠️ ELEVEN_API_KEY not set. Voice cloning disabled.")
-        else:
-            print("⚠️ elevenlabs package not available. Voice cloning disabled.")
+        print("🎤 Voice cloner initialized - will check preferences when creating clone")
 
     async def save_frames(self, frames: List[rtc.AudioFrame], speech_id: Optional[str]) -> Optional[str]:
-        """Accumulate audio frames without creating clones - just store for later use."""
+        """Accumulate audio frames - always record for potential voice cloning."""
         if not (PYDUB_AVAILABLE and frames):
             return None
         try:
@@ -237,6 +227,17 @@ class VoiceCloner:
             return self.final_voice_id or self.cfg.avatar_voice_id
         
         self.clone_creation_attempted = True
+        
+        # Check if voice cloning is enabled from orchestrator
+        voice_cloning_enabled = self.orchestrator._get_voice_cloning_preference() if self.orchestrator else False
+        if not voice_cloning_enabled:
+            print("🎤 Voice cloning disabled via URL parameter, using default avatar voice")
+            self.final_voice_id = self.cfg.avatar_voice_id
+            return self.final_voice_id
+        
+        # Initialize ElevenLabs client if not already done
+        if not self.client:
+            self._init_elevenlabs_client()
         
         # Check if we have enough audio and ElevenLabs is available
         if not (self.client and self.voice_accumulator and self.accumulated_secs >= self.cfg.instant_clone_min_secs):
@@ -326,6 +327,23 @@ class VoiceCloner:
             
             # Always return default voice to prevent blocking avatar creation
             return self.cfg.avatar_voice_id
+
+    def _init_elevenlabs_client(self):
+        """Initialize ElevenLabs client for voice cloning."""
+        if not ELEVENLABS_AVAILABLE:
+            print("⚠️ elevenlabs package not available. Voice cloning disabled.")
+            return
+            
+        api_key = os.getenv("ELEVEN_API_KEY")
+        if api_key:
+            try:
+                self.client = ElevenLabs(api_key=api_key)
+                print("🎤 ElevenLabs client initialized for voice cloning")
+            except Exception as e:  # pragma: no cover
+                print(f"⚠️ ElevenLabs init failed: {e}")
+        else:
+            print("⚠️ ELEVEN_API_KEY not set. Voice cloning disabled.")
+
 
     async def cleanup_voices(self) -> None:
         """Delete all created voice clones from ElevenLabs"""
@@ -476,6 +494,7 @@ class Orchestrator:
         self.current_mode_is_alexa = True  # start in Alexa mode
         self.camera_started = False  # track camera state
         self._cleanup_registered = False  # track if cleanup is registered
+        self.voice_cloning_enabled = False  # store voice cloning preference
 
     # ---- Session setup ----
     async def start(self) -> None:
@@ -492,7 +511,7 @@ class Orchestrator:
         )
 
         # Voice cloner bound to the room
-        self.cloner = VoiceCloner(self.cfg, self.ctx.room)
+        self.cloner = VoiceCloner(self.cfg, self.ctx.room, self)
 
         # Agent
         agent = Assistant(cfg=self.cfg, is_alexa=True, room=self.ctx.room, cloner=self.cloner, orchestrator=self)
@@ -507,6 +526,8 @@ class Orchestrator:
         # Event hooks
         self._wire_events()
 
+        # No need for delayed setup - voice cloning preference is checked when needed
+
         # Greet if participant is already here
         if self.ctx.room.remote_participants:
             asyncio.create_task(self._alexa_greeting())
@@ -516,6 +537,11 @@ class Orchestrator:
         
         # Register cleanup handler
         self._register_cleanup()
+    
+    def _get_voice_cloning_preference(self) -> bool:
+        """Get voice cloning preference from stored RPC value."""
+        print(f"🎤 Voice cloning preference: {self.voice_cloning_enabled}")
+        return self.voice_cloning_enabled
     
     def _register_cleanup(self) -> None:
         """Register cleanup handler for when agent shuts down"""
@@ -575,11 +601,15 @@ class Orchestrator:
             print(f"🔗 participant_connected: {p.identity}")
             if self.current_mode_is_alexa:
                 asyncio.create_task(self._alexa_greeting())
-
+        
         @self.ctx.room.on("data_received")
         def _on_data(pkt: rtc.DataPacket):
             try:
-                if pkt.topic == "mode_switch":
+                if pkt.topic == "voice_cloning_preference":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    self.voice_cloning_enabled = message.get("voiceCloningEnabled", False)
+                    print(f"🎤 Received voice cloning preference via room data: {self.voice_cloning_enabled}")
+                elif pkt.topic == "mode_switch":
                     message = json.loads(pkt.data.decode("utf-8"))
                     if message.get("action") == "switch_mode":
                         # Store avatar ID from the message if provided and wait for it
@@ -715,7 +745,7 @@ class Orchestrator:
                     print("🎭 Avatar mode already active, but creating voice clone...")
                     # Still create voice clone even if already in avatar mode
                     await self._create_and_apply_voice_clone()
-                    return
+                    # Don't return early - we still need to create avatar session if it doesn't exist
                     
                 print("🎭 Switching → Avatar mode")
                 self.current_mode_is_alexa = False
@@ -742,14 +772,12 @@ class Orchestrator:
                     await self.avatar.start(self.session, room=self.ctx.room)
                     print(f"🎭 Avatar session started successfully")
                 
-                # Only generate greeting if this is the first time switching to avatar mode
+                # Generate greeting and ensure transcriptions continue to flow
                 if not was_already_avatar_mode:
-                    await self.session.generate_reply(
-                        instructions=(
-                            "Announce that you are the user's personalized avatar, created from their photo. "
-                            "Thank them and ask how you can help today."
-                        )
-                    )
+                    # Use session.say() to ensure transcriptions are captured
+                    greeting_text = "Hello! I'm your personalized avatar, created from your photo. Thank you for creating me. How can I help you today?"
+                    await self.session.say(greeting_text)
+                    print(f"🎤 Avatar greeting sent via session.say() for transcription capture")
             else:
                 print("🔊 Switching → Alexa mode")
                 self.current_mode_is_alexa = True
@@ -823,12 +851,10 @@ class Orchestrator:
                                 # Switch from Alexa to Avatar mode with voice cloning
                                 self.current_mode_is_alexa = False
                                 await self._create_and_apply_voice_clone()
-                                await self.session.generate_reply(
-                                    instructions=(
-                                        "Announce that you are now the user's personalized avatar, created from their photo. "
-                                        "Thank them and ask how you can help today."
-                                    )
-                                )
+                                # Use session.say() to ensure transcriptions are captured
+                                greeting_text = "Hello! I'm your personalized avatar, created from your photo. Thank you for creating me. How can I help you today?"
+                                await self.session.say(greeting_text)
+                                print(f"🎤 Avatar greeting sent via session.say() for transcription capture")
                             else:
                                 # Already in avatar mode, just update voice
                                 await self._create_and_apply_voice_clone()

@@ -28,8 +28,21 @@ export default function Page() {
   const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(true);
   const [showAlexaTransition, setShowAlexaTransition] = useState(false);
   const [showAvatarAppears, setShowAvatarAppears] = useState(false);
-  const avatarSetup = useAvatarSetup();
+  const [voiceCloningEnabled, setVoiceCloningEnabled] = useState(false);
+  const avatarSetup = useAvatarSetup(voiceCloningEnabled);
   const photoCaptureRef = useRef<PhotoCaptureRef | null>(null);
+
+  // Check URL parameters for voice cloning enablement
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const enableVoiceCloning = urlParams.get('voiceCloning') === 'true' || 
+                                 urlParams.get('voice') === 'true' ||
+                                 window.location.hash.includes('voice');
+      setVoiceCloningEnabled(enableVoiceCloning);
+      console.log('🎤 Voice cloning enabled:', enableVoiceCloning);
+    }
+  }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
     try {
@@ -72,6 +85,7 @@ export default function Page() {
       
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
+      
       
       // Make room available globally for mode switching
       (window as any).liveKitRoom = room;

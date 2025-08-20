@@ -1,4 +1,5 @@
 import { useCallback, useReducer } from 'react';
+import { useRoomData } from './useRoomData';
 
 // Types for the avatar setup flow
 export type AvatarSetupState = {
@@ -77,8 +78,9 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
   }
 }
 
-export function useAvatarSetup() {
+export function useAvatarSetup(voiceCloningEnabled: boolean = false) {
   const [state, dispatch] = useReducer(avatarSetupReducer, initialState);
+  const { sendVoiceCloningPreference, sendAvatarData, sendModeSwitch } = useRoomData();
 
   const createAvatar = useCallback(async (photoBlob: Blob): Promise<void> => {
     try {
@@ -92,6 +94,8 @@ export function useAvatarSetup() {
         method: "POST",
         body: formData,
       });
+
+      await sendVoiceCloningPreference(voiceCloningEnabled);
       
       if (!response.ok) {
         throw new Error(`Avatar creation failed: ${response.status}`);
@@ -131,43 +135,23 @@ export function useAvatarSetup() {
 
     // Send avatar data and mode switch message via LiveKit room data
     try {
-      const room = (window as any).liveKitRoom as { localParticipant?: { publishData: (data: Uint8Array, options: { topic: string }) => Promise<void> } };
-      if (room && room.localParticipant) {
-        // Get the created avatar ID from state
-        const assetId = localStorage.getItem("hedraAssetId");
-        
-        if (assetId) {
-          // Send avatar data first
-          const avatarMessage = {
-            assetId: assetId
-          };
-          
-          await room.localParticipant.publishData(
-            new TextEncoder().encode(JSON.stringify(avatarMessage)),
-            { topic: 'avatar_data' }
-          );
-          console.log('📨 Sent avatar data via room data:', avatarMessage);
-        }
-
-        // Then send mode switch message with avatar ID
-        const modeMessage = {
-          action: 'switch_mode',
-          mode: 'avatar',
-          avatarId: assetId
-        };
-        
-        await room.localParticipant.publishData(
-          new TextEncoder().encode(JSON.stringify(modeMessage)),
-          { topic: 'mode_switch' }
-        );
-        console.log('📨 Sent mode switch message via room data:', modeMessage);
-      } else {
-        console.warn('⚠️ Room not available for mode switch message');
+      // Send voice cloning preference first
+      await sendVoiceCloningPreference(voiceCloningEnabled);
+      
+      // Get the created avatar ID from state
+      const assetId = localStorage.getItem("hedraAssetId");
+      
+      if (assetId) {
+        // Send avatar data
+        await sendAvatarData(assetId);
       }
+
+      // Then send mode switch message with avatar ID
+      await sendModeSwitch('avatar', assetId || undefined);
     } catch (error) {
       console.error('Failed to send mode switch message:', error);
     }
-  }, [createAvatar]);
+  }, [createAvatar, voiceCloningEnabled, sendVoiceCloningPreference, sendAvatarData, sendModeSwitch]);
 
   const handleSkipPhoto = useCallback(() => {
     dispatch({ type: 'PHOTO_SKIPPED' });
