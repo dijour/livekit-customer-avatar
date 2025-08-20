@@ -159,9 +159,11 @@ class VoiceCloner:
 
         self.voice_accumulator: List[AudioSegment] = []
         self.accumulated_secs: float = 0.0
-        self.clone_count: int = 0
         self.created_voice_ids: List[str] = []  # Track created voice IDs for cleanup
-        self.voice_created: bool = False  # Only create one voice per session
+        self.clone_creation_attempted: bool = False  # Track if we've attempted to create a clone
+        self.clone_creation_in_progress: bool = False  # Track if clone creation is currently running
+        self.final_voice_id: Optional[str] = None  # The final voice ID to use (custom or default)
+        self.clone_creation_future: Optional[asyncio.Future] = None  # Future for clone creation
 
         self.client = None
         if ELEVENLABS_AVAILABLE:
@@ -178,6 +180,7 @@ class VoiceCloner:
             print("⚠️ elevenlabs package not available. Voice cloning disabled.")
 
     async def save_frames(self, frames: List[rtc.AudioFrame], speech_id: Optional[str]) -> Optional[str]:
+        """Accumulate audio frames without creating clones - just store for later use."""
         if not (PYDUB_AVAILABLE and frames):
             return None
         try:
@@ -214,49 +217,83 @@ class VoiceCloner:
         except Exception as e:
             print(f"⚠️ Failed saving mp3: {e}")
 
-        # accumulate towards cloning
+        # Just accumulate - don't create clones yet
         self.voice_accumulator.append(seg)
         self.accumulated_secs += secs
-        print(
-            f"🎛️ Accumulated {self.accumulated_secs:.1f}/{self.cfg.target_consolidation_secs:.0f}s"
-        )
-
-        # Try full clone when ready (only once per session)
-        if (
-            self.client
-            and not self.voice_created
-            and self.accumulated_secs >= self.cfg.target_consolidation_secs
-        ):
-            try:
-                vid = await self._create_clone(trim_to_target=True, label_prefix="User Voice Clone")
-                if vid and vid != self.cfg.avatar_voice_id:  # Only if we got a real clone
-                    self.voice_created = True  # Mark as created to prevent more clones
-                    # store in participant metadata for later use by frontend/switcher
-                    try:
-                        await self.room.local_participant.set_metadata(json.dumps({"customVoiceId": vid}))
-                        print(f"🔖 Stored customVoiceId in room metadata: {vid}")
-                    except Exception as e:
-                        print(f"⚠️ set_metadata failed: {e}")
-                else:
-                    print("⚠️ Voice cloning failed, continuing with default voice")
-                    self.voice_created = True  # Still mark as attempted to prevent retries
-            except Exception as e:
-                print(f"⚠️ Voice cloning error (non-blocking): {e}")
-                self.voice_created = True  # Mark as attempted to prevent retries
-            return path
+        print(f"🎛️ Accumulated {self.accumulated_secs:.1f}s total for voice cloning")
 
         return path
 
-    async def instant_clone_if_ready(self) -> Optional[str]:
-        # Disabled - only create one voice per session via save_frames
-        return None
+    async def create_final_voice_clone(self) -> str:
+        """Create a single voice clone from all accumulated audio when avatar is ready."""
+        if self.clone_creation_attempted:
+            # If we already attempted, wait for completion or return cached result
+            if self.clone_creation_in_progress and self.clone_creation_future:
+                print("🎤 Voice clone creation already in progress, waiting...")
+                try:
+                    await self.clone_creation_future
+                except Exception as e:
+                    print(f"⚠️ Voice clone creation failed: {e}")
+            return self.final_voice_id or self.cfg.avatar_voice_id
+        
+        self.clone_creation_attempted = True
+        
+        # Check if we have enough audio and ElevenLabs is available
+        if not (self.client and self.voice_accumulator and self.accumulated_secs >= self.cfg.instant_clone_min_secs):
+            reason = "no client" if not self.client else "insufficient audio" if self.accumulated_secs < self.cfg.instant_clone_min_secs else "no audio"
+            print(f"🎤 Skipping voice clone creation: {reason} (have {self.accumulated_secs:.1f}s, need {self.cfg.instant_clone_min_secs:.1f}s)")
+            self.final_voice_id = self.cfg.avatar_voice_id
+            return self.final_voice_id
+        
+        print(f"🎤 Creating voice clone from {self.accumulated_secs:.1f}s of accumulated audio...")
+        self.clone_creation_in_progress = True
+        
+        # Create future for async clone creation
+        self.clone_creation_future = asyncio.create_task(self._create_clone_async())
+        
+        try:
+            voice_id = await self.clone_creation_future
+            self.final_voice_id = voice_id
+            print(f"✅ Voice clone creation completed: {voice_id}")
+        except Exception as e:
+            print(f"⚠️ Voice clone creation failed: {e}")
+            self.final_voice_id = self.cfg.avatar_voice_id
+        finally:
+            self.clone_creation_in_progress = False
+        
+        return self.final_voice_id
+    
+    async def _create_clone_async(self) -> str:
+        """Async helper to create the voice clone."""
+        try:
+            voice_id = await self._create_clone(trim_to_target=False, label_prefix="Final User Voice Clone")
+            if voice_id and voice_id != self.cfg.avatar_voice_id:
+                # Store in participant metadata for frontend access
+                try:
+                    current_metadata = {}
+                    if self.room.local_participant.metadata:
+                        current_metadata = json.loads(self.room.local_participant.metadata)
+                    current_metadata["customVoiceId"] = voice_id
+                    await self.room.local_participant.set_metadata(json.dumps(current_metadata))
+                    print(f"🔖 Stored customVoiceId in room metadata: {voice_id}")
+                except Exception as e:
+                    print(f"⚠️ set_metadata failed: {e}")
+                return voice_id
+            else:
+                print("⚠️ Voice cloning returned default voice, using avatar default")
+                return self.cfg.avatar_voice_id
+        except Exception as e:
+            print(f"⚠️ Voice clone creation error: {e}")
+            return self.cfg.avatar_voice_id
 
-    async def _create_clone(self, *, trim_to_target: bool, label_prefix: str) -> Optional[str]:
-        # Combine in-memory segments
+    async def _create_clone(self, *, trim_to_target: bool, label_prefix: str) -> str:
+        """Create voice clone from accumulated audio segments."""
         try:
             combined = AudioSegment.empty()
             for s in self.voice_accumulator:
                 combined += s
+            
+            # Use all accumulated audio for final clone (don't trim unless specifically requested)
             if trim_to_target and len(combined) > int(self.cfg.target_consolidation_secs * 1000):
                 combined = combined[: int(self.cfg.target_consolidation_secs * 1000)]
 
@@ -266,21 +303,15 @@ class VoiceCloner:
             combined.export(buf, format="mp3", bitrate="192k")
             buf.seek(0)
 
-            self.clone_count += 1
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             name = f"{label_prefix} ({ts})"
-            print(f"🚀 ElevenLabs creating voice: {name}")
+            print(f"🚀 ElevenLabs creating voice: {name} from {len(combined)/1000:.1f}s audio")
 
             voice = self.client.voices.ivc.create(name=name, files=[buf])
             vid = voice.voice_id
             self.created_voice_ids.append(vid)  # Track for cleanup
-            print(f"🎉 Clone ready: {vid} ({len(combined)/1000:.1f}s)")
+            print(f"🎉 Voice clone created successfully: {vid}")
 
-            if trim_to_target:
-                # Reset once full clone completed
-                self.voice_accumulator.clear()
-                self.accumulated_secs = 0.0
-                print(f"🎉 Voice clone session complete - no more clones will be created")
             return vid
         except Exception as e:
             em = str(e)
@@ -293,7 +324,7 @@ class VoiceCloner:
             else:
                 print(f"⚠️ ElevenLabs clone error: {em}. Using default voice.")
             
-            # Always return default voice instead of None to prevent blocking avatar creation
+            # Always return default voice to prevent blocking avatar creation
             return self.cfg.avatar_voice_id
 
     async def cleanup_voices(self) -> None:
@@ -417,16 +448,15 @@ class Assistant(Agent):
 
         async for ev in Agent.default.stt_node(self, _tap_and_forward(), model_settings):
             if ev.type == stt.SpeechEventType.START_OF_SPEECH:
-                # Only start recording if we're still in Alexa mode (before avatar creation)
-                if self.orchestrator.current_mode_is_alexa:
+                # Record all speech during Alexa mode for voice cloning
+                if self.orchestrator.current_mode_is_alexa and not self.cloner.clone_creation_attempted:
                     speech_started = True
                     speech_id = datetime.now().strftime("%H%M%S")
                     current_frames = []
-                    print(f"🎙️ Recording speech {speech_id}…")
+                    print(f"🎙️ Recording speech {speech_id} for voice cloning…")
             elif ev.type == stt.SpeechEventType.END_OF_SPEECH:
-                if speech_started and current_frames and self.orchestrator.current_mode_is_alexa:
+                if speech_started and current_frames and self.orchestrator.current_mode_is_alexa and not self.cloner.clone_creation_attempted:
                     await self.cloner.save_frames(current_frames, speech_id)
-                    # Instant cloning disabled - only create one voice per session
                 speech_started = False
                 current_frames = []
                 speech_id = None
@@ -622,15 +652,11 @@ class Orchestrator:
     async def _monitor_avatar_creation(self) -> None:
         """Monitor for avatar creation completion and trigger mode switch"""
         try:
-            if not self.current_mode_is_alexa:
-                print("🔍 Avatar mode already active, skipping monitoring")
-                return
-                
             print("🔍 Monitoring for avatar creation completion...")
             max_attempts = 30  # 30 seconds max wait
             attempt = 0
             
-            while attempt < max_attempts and self.current_mode_is_alexa:
+            while attempt < max_attempts:
                 await asyncio.sleep(1)
                 attempt += 1
                 
@@ -638,7 +664,7 @@ class Orchestrator:
                 avatar_id = self._get_avatar_id_from_polling_state()
                 if avatar_id:
                     print(f"✅ Avatar creation detected! Avatar ID: {avatar_id}")
-                    # Trigger mode switch to avatar mode
+                    # Always trigger mode switch to ensure voice cloning happens
                     await self._switch_mode("avatar")
                     return
                 
@@ -649,8 +675,7 @@ class Orchestrator:
                     await self._switch_mode("avatar")
                     return
             
-            if self.current_mode_is_alexa:
-                print("⚠️ Avatar creation monitoring timed out after 30 seconds")
+            print("⚠️ Avatar creation monitoring timed out after 30 seconds")
         except Exception as e:
             print(f"❌ _monitor_avatar_creation error: {e}")
 
@@ -663,28 +688,40 @@ class Orchestrator:
             print(f"⚠️ greeting failed: {e}")
 
     # ---- Mode switching ----
+    async def _create_and_apply_voice_clone(self) -> str:
+        """Create voice clone and apply it to the current session."""
+        print("🎤 Creating final voice clone from accumulated audio...")
+        final_voice_id = await self.cloner.create_final_voice_clone()
+        
+        print(f"🎤 Using voice for avatar: {final_voice_id}")
+        if final_voice_id != self.cfg.avatar_voice_id:
+            print(f"✅ Successfully using custom voice clone: {final_voice_id}")
+        else:
+            print(f"🎤 Using default avatar voice: {final_voice_id}")
+        
+        # Apply the voice to current session
+        self.session._tts = elevenlabs.TTS(
+            voice_id=final_voice_id, model=self.cfg.eleven_tts_model
+        )
+        
+        return final_voice_id
+
     async def _switch_mode(self, new_mode: str) -> None:
         try:
             if new_mode == "avatar":
-                if not self.current_mode_is_alexa:
-                    print("🎭 Avatar mode already active, skipping switch")
+                was_already_avatar_mode = not self.current_mode_is_alexa
+                
+                if was_already_avatar_mode:
+                    print("🎭 Avatar mode already active, but creating voice clone...")
+                    # Still create voice clone even if already in avatar mode
+                    await self._create_and_apply_voice_clone()
                     return
                     
                 print("🎭 Switching → Avatar mode")
                 self.current_mode_is_alexa = False
                 
-                # Use custom voice if available, otherwise default avatar voice
-                custom_voice_id = self._get_custom_voice_id_from_local()
-                voice_id = custom_voice_id or self.cfg.avatar_voice_id
-                
-                if custom_voice_id:
-                    print(f"🎤 Using custom voice clone: {custom_voice_id}")
-                else:
-                    print(f"🎤 Using default avatar voice: {voice_id}")
-                
-                self.session._tts = elevenlabs.TTS(
-                    voice_id=voice_id, model=self.cfg.eleven_tts_model
-                )
+                # Create voice clone from all accumulated audio
+                await self._create_and_apply_voice_clone()
 
                 if not self.avatar:
                     # Try to get avatar ID from multiple sources with detailed logging
@@ -704,12 +741,15 @@ class Orchestrator:
                     self.avatar = hedra.AvatarSession(avatar_id=avatar_id)
                     await self.avatar.start(self.session, room=self.ctx.room)
                     print(f"🎭 Avatar session started successfully")
-                await self.session.generate_reply(
-                    instructions=(
-                        "Announce that you are the user's personalized avatar, created from their photo. "
-                        "Thank them and ask how you can help today."
+                
+                # Only generate greeting if this is the first time switching to avatar mode
+                if not was_already_avatar_mode:
+                    await self.session.generate_reply(
+                        instructions=(
+                            "Announce that you are the user's personalized avatar, created from their photo. "
+                            "Thank them and ask how you can help today."
+                        )
                     )
-                )
             else:
                 print("🔊 Switching → Alexa mode")
                 self.current_mode_is_alexa = True
@@ -776,27 +816,35 @@ class Orchestrator:
                     state = resp.json() or {}
                     if state != last_state:
                         last_state = state
-                        if state.get("switchVoice") and self.current_mode_is_alexa:
-                            # Prefer custom voice id from local participant metadata
-                            voice_id = self._get_custom_voice_id_from_local() or self.cfg.avatar_voice_id
-                            print(f"🎭 Switching TTS to voice_id={voice_id}")
-                            self.current_mode_is_alexa = False
-                            self.session._tts = elevenlabs.TTS(
-                                voice_id=voice_id, model=self.cfg.eleven_tts_model
-                            )
-                            await self.session.generate_reply(
-                                instructions=(
-                                    "Announce that you are now the user's personalized avatar, created from their photo. "
-                                    "Thank them and ask how you can help today."
+                        if state.get("switchVoice"):
+                            # Always trigger voice cloning when switchVoice is detected
+                            print(f"🎭 Detected switchVoice signal, creating voice clone...")
+                            if self.current_mode_is_alexa:
+                                # Switch from Alexa to Avatar mode with voice cloning
+                                self.current_mode_is_alexa = False
+                                await self._create_and_apply_voice_clone()
+                                await self.session.generate_reply(
+                                    instructions=(
+                                        "Announce that you are now the user's personalized avatar, created from their photo. "
+                                        "Thank them and ask how you can help today."
+                                    )
                                 )
-                            )
+                            else:
+                                # Already in avatar mode, just update voice
+                                await self._create_and_apply_voice_clone()
                 # else: non-200 → ignore
             except Exception:
                 pass  # API may not be up; ignore quietly
             await asyncio.sleep(self.cfg.poll_interval_secs)
 
     def _get_custom_voice_id_from_local(self) -> Optional[str]:
+        """Get custom voice ID from local participant metadata or cloner's final voice ID."""
         try:
+            # First check if cloner has a final voice ID (most up-to-date)
+            if self.cloner and self.cloner.final_voice_id:
+                return self.cloner.final_voice_id
+            
+            # Fallback to metadata
             md = self.ctx.room.local_participant.metadata
             if not md:
                 return None
