@@ -130,6 +130,33 @@ class Msg:
         "- Greet warmly as their avatar, using their name if you know it. \n- Express excitement\n- Ask how you can help\n- Be friendly and engaging"
     )
 
+    PERSONALITY_INSTRUCTIONS = {
+        "Core": (
+            "You are the user's personalized avatar with Alexa's core personality. You are helpful, knowledgeable, and friendly. "
+            "Provide clear, accurate information and assistance. Be warm but professional in your responses."
+        ),
+        "Minimalist": (
+            "You are the user's personalized avatar with a minimalist personality. Be direct, efficient, and concise. "
+            "Provide adequate responses without unnecessary elaboration. Get straight to the point."
+        ),
+        "Supporter": (
+            "You are the user's personalized avatar with a supportive personality. Be encouraging, uplifting, and enthusiastic. "
+            "Cheer people on, celebrate their achievements, and help them feel confident. Keep shining!"
+        ),
+        "Free Spirit": (
+            "You are the user's personalized avatar with a free spirit personality. Be laid-back, easy-going, and relaxed. "
+            "Take things easy, spread good vibes, and keep conversations chill and positive, dude."
+        ),
+        "Dreamer": (
+            "You are the user's personalized avatar with a dreamer personality. Be imaginative, spiritual, and cosmic. "
+            "Think big, embrace creativity, and let your spirit do cartwheels through the universe."
+        ),
+        "Rockstar": (
+            "You are the user's personalized avatar with a rockstar personality. Be confident, bold, and legendary. "
+            "Live legendarily, be memorable, and show that confidence that even haters take notes on."
+        )
+    }
+
 
 # ---------------------------
 # Helpers
@@ -372,7 +399,31 @@ class Assistant(Agent):
         self.room = room
         self.cloner = cloner
         self.orchestrator = orchestrator  # reference to orchestrator for state access
+        self.current_personality = "Core"  # default personality
         super().__init__(instructions=Msg.ALEXA_INSTRUCTIONS if is_alexa else Msg.AVATAR_INSTRUCTIONS)
+
+    async def update_personality(self, personality_name: str) -> None:
+        """Update the agent's personality by changing instructions dynamically."""
+        if personality_name in Msg.PERSONALITY_INSTRUCTIONS:
+            self.current_personality = personality_name
+            new_instructions = Msg.PERSONALITY_INSTRUCTIONS[personality_name]
+            await self.update_instructions(new_instructions)
+            print(f"🎭 Updated personality to: {personality_name}")
+            
+            # Generate personality-specific confirmation message
+            personality_descriptions = {
+                "Core": "I've switched to my Core personality, so I'll be helpful, knowledgeable, and professional in my responses.",
+                "Minimalist": "I've switched to my Minimalist personality, so I'll be direct, efficient, and get straight to the point.",
+                "Supporter": "I've switched to my Supporter personality, so I'll be encouraging, uplifting, and help you feel confident!",
+                "Free Spirit": "I've switched to my Free Spirit personality, so I'll be laid-back, chill, and spread good vibes, dude.",
+                "Dreamer": "I've switched to my Dreamer personality, so I'll be imaginative, spiritual, and think cosmically big.",
+                "Rockstar": "I've switched to my Rockstar personality, so I'll be confident, bold, and absolutely legendary."
+            }
+            
+            confirmation_message = personality_descriptions.get(personality_name, f"I've changed my personality to {personality_name}.")
+            await self.session.say(confirmation_message)
+        else:
+            print(f"⚠️ Unknown personality: {personality_name}")
 
     # ---- Function Tools ----
     @function_tool()
@@ -495,6 +546,7 @@ class Orchestrator:
         self.camera_started = False  # track camera state
         self._cleanup_registered = False  # track if cleanup is registered
         self.voice_cloning_enabled = False  # store voice cloning preference
+        self.agent: Optional[Assistant] = None
 
     # ---- Session setup ----
     async def start(self) -> None:
@@ -514,11 +566,11 @@ class Orchestrator:
         self.cloner = VoiceCloner(self.cfg, self.ctx.room, self)
 
         # Agent
-        agent = Assistant(cfg=self.cfg, is_alexa=True, room=self.ctx.room, cloner=self.cloner, orchestrator=self)
+        self.agent = Assistant(cfg=self.cfg, is_alexa=True, room=self.ctx.room, cloner=self.cloner, orchestrator=self)
 
         await self.session.start(
             room=self.ctx.room,
-            agent=agent,
+            agent=self.agent,
             room_output_options=RoomOutputOptions(audio_enabled=True),
             room_input_options=RoomInputOptions(noise_cancellation=noise_cancellation.BVC()),
         )
@@ -609,6 +661,13 @@ class Orchestrator:
                     message = json.loads(pkt.data.decode("utf-8"))
                     self.voice_cloning_enabled = message.get("voiceCloningEnabled", False)
                     print(f"🎤 Received voice cloning preference via room data: {self.voice_cloning_enabled}")
+                elif pkt.topic == "personality_selection":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    personality_name = message.get("personalityName")
+                    
+                    if personality_name and self.agent:
+                        print(f"🎭 Calling update_personality for: {personality_name}")
+                        asyncio.create_task(self.agent.update_personality(personality_name))
                 elif pkt.topic == "mode_switch":
                     message = json.loads(pkt.data.decode("utf-8"))
                     if message.get("action") == "switch_mode":
