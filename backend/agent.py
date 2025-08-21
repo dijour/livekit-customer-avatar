@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import requests
 from dataclasses import dataclass
 from datetime import datetime
 from typing import AsyncIterable, List, Optional, Tuple
@@ -661,6 +662,12 @@ class Orchestrator:
                     message = json.loads(pkt.data.decode("utf-8"))
                     self.voice_cloning_enabled = message.get("voiceCloningEnabled", False)
                     print(f"🎤 Received voice cloning preference via room data: {self.voice_cloning_enabled}")
+                elif pkt.topic == "filter_selection":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    filter_id = message.get("filterID")
+                    print(f"🎨 Received filter selection via room data: {filter_id}")
+                    asyncio.create_task(self._apply_filter(filter_id))
+                    
                 elif pkt.topic == "personality_selection":
                     message = json.loads(pkt.data.decode("utf-8"))
                     personality_name = message.get("personalityName")
@@ -702,6 +709,32 @@ class Orchestrator:
                 print(f"❌ data_received error: {e}")
 
     # ---- Helper methods ----
+    async def _apply_filter(self, filter_id: str) -> None:
+        """Apply a filter effect by replacing the avatar with a placeholder"""
+        try:
+            # previous_avatar_id = self._get_avatar_id_from_polling_state()
+            # url = "https://api.hedra.com/web-app/public/assets"
+            # headers = {"X-API-Key": os.getenv("HEDRA_API_KEY")}
+            # querystring = {"type":"image","ids":previous_avatar_id}
+            # response = requests.get(url, headers=headers, params=querystring)
+            # url = response.json()[0]["asset"]["url"]
+            
+            
+            #this overwrites the avatar with a placeholder
+            # placeholder_avatar_id = "0396e7f6-252a-4bd8-8f41-e8d1ecd6367e"
+            self.avatar = hedra.AvatarSession(
+                avatar_id=filter_id,
+                avatar_participant_identity="hedra-avatar",
+            )
+            await self.avatar.start(self.session, room=self.ctx.room)
+            print(f"🎨 Filter avatar session started with placeholder ID")
+            
+            # Announce the filter change
+            await self.session.say(f"I've applied the {filter_id} filter!")
+        except Exception as e:
+            print(f"⚠️ Failed to apply filter {filter_id}: {e}")
+            # Try to recover by restarting the original avatar session if needed
+
     async def _store_avatar_id_in_room(self, avatar_id: str) -> None:
         """Store avatar ID in local participant metadata for immediate access"""
         try:
@@ -827,7 +860,10 @@ class Orchestrator:
                     else:
                         print(f"⚠️ Falling back to default avatar ID: {avatar_id}")
                     
-                    self.avatar = hedra.AvatarSession(avatar_id=avatar_id)
+                    self.avatar = hedra.AvatarSession(
+                        avatar_id=avatar_id,
+                        avatar_participant_identity="hedra-avatar",
+                    )
                     await self.avatar.start(self.session, room=self.ctx.room)
                     print(f"🎭 Avatar session started successfully")
                 

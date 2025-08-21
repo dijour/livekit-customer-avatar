@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     
     const formData = await request.formData();
     const uploadedFile = formData.get("image") as File;
+    const customPrompt = formData.get("prompt") as string;
 
     if (!uploadedFile) {
       console.log("Error: No image file provided");
@@ -29,6 +30,11 @@ export async function POST(request: NextRequest) {
       size: uploadedFile.size,
       type: uploadedFile.type
     });
+
+    console.log("Custom prompt provided:", !!customPrompt);
+    if (customPrompt) {
+      console.log("Custom prompt:", customPrompt);
+    }
 
     // Convert the image file to buffer
     const bytes = await uploadedFile.arrayBuffer();
@@ -64,14 +70,15 @@ export async function POST(request: NextRequest) {
     console.log("======================");
 
     // Use gpt-image-1 to enhance the image
-    const enhancementPrompt = "Add a funny hat to this person.";
+    const enhancementPrompt = customPrompt || "Add a funny hat to this person.";
 
     console.log("Making OpenAI API call...");
     const imageResponse = await openai.images.edit({
       model: "gpt-image-1",
       image: imageFile,
       prompt: enhancementPrompt,
-      size: "1024x1024"
+      size: "1024x1024",
+      quality: "low"
     });
     console.log("OpenAI API call completed");
     console.log("Response data length:", imageResponse.data?.length || 0);

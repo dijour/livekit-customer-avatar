@@ -9,8 +9,7 @@ import { Toggle } from '../components/Toggle';
 import { Popover } from '../components/Popover';
 import { MaskedMediaView } from "@components/MaskedMediaView";
 import { useAvatarSetup } from '../hooks/useAvatarSetup';
-import { useCombinedTranscriptions } from '../hooks/useCombinedTranscriptions';
-import { useLocalMicTrack } from '../hooks/useLocalMicTrack';
+
 import { useRoomData } from '../hooks/useRoomData';
 import {
   RoomAudioRenderer,
@@ -150,6 +149,8 @@ export default function Page() {
       setIsAutoConnecting(false);
     }
   }, [room, avatarSetup]);
+
+
 
   // Monitor avatar creation and trigger phase transition
   useEffect(() => {
@@ -623,7 +624,8 @@ function AvatarVisualControls() {
     { name: "Rockstar", subtitle: "Living so legendarily right now that even my haters are taking notes.", media: "/videos/fireworks.mp4" }, //flowers?
 
   ];
-
+  const { state } = useAvatarSetup();
+  const blob = state.userPhoto; // This is your original photo blob
   const handlePersonalitySelection = useCallback(async () => {
     const selectedPersonality = personalities[currentPersonalityIndex];
     console.log('🎭 Personality selected:', selectedPersonality.name);
@@ -677,18 +679,107 @@ function AvatarVisualControls() {
   }, []);
 
   const handleFilterSelection = useCallback(async (filterName: string) => {
-    console.log('🎨 Filter selected:', filterName);
     
-    // Send filter selection to backend via LiveKit data channel
-    try {
-      await publishData('filter_selection', {
-        filterName: filterName,
-        timestamp: Date.now()
-      });
-      console.log('📡 Filter data sent to backend');
-    } catch (error) {
-      console.error('Failed to send filter data:', error);
+    console.log('🎨 Filter selected:', filterName);
+    const currentID = localStorage.getItem("hedraAssetId");
+    console.log(currentID);
+    
+    const assetResponse = await fetch(`/api/get-hedra-asset?id=${currentID}`);
+    const assetResult = await assetResponse.json();
+    const assetUrl = assetResult.data[0]?.asset?.url;
+    console.log('Asset URL:', assetUrl);    
+
+    // Download the image from the URL and convert to blob
+    let blob = null;
+    if (assetUrl) {
+      try {
+        const imageResponse = await fetch(assetUrl);
+        blob = await imageResponse.blob();
+        console.log('Downloaded image blob:', blob);
+        const enhanceFormData = new FormData();
+        enhanceFormData.append("image", blob, "photo.jpg");
+        enhanceFormData.append("prompt", filterName);
+        const enhanceResponse = await fetch("/api/enhance-image", {
+          method: "POST",
+          body: enhanceFormData,
+        });
+        
+        const enhanceResult = await enhanceResponse.json();
+        console.log('Modified image result:', enhanceResult);
+        if (enhanceResult.success) {
+          // Convert base64 string back to blob for upload
+          const base64Data = enhanceResult.enhancedImage;
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const enhancedBlob = new Blob([byteArray], { type: 'image/jpeg' });
+          
+          console.log('Enhanced blob created:', enhancedBlob.size, 'bytes');
+          
+          const avatarFormData = new FormData();
+          avatarFormData.append("photo", enhancedBlob, "avatar-photo.jpg");
+          
+          const avatarResponse = await fetch("/api/create-avatar", {
+            method: "POST",
+            body: avatarFormData,
+          });
+          const avatarResult = await avatarResponse.json();
+          console.log('New avatar result:', avatarResult);
+
+          if (!avatarResult.assetId) {
+            throw new Error("No asset ID received from avatar creation");
+          }
+
+          // Send avatar ID to backend via LiveKit data channel
+          try {
+            await publishData('filter_selection', {
+              filterID: avatarResult.assetId,
+              timestamp: Date.now()
+            });
+            console.log('📡 Filter data sent to backend');
+          } catch (error) {
+            console.error('Failed to send filter data:', error);
+          }
+        }
+
+      } catch (error) {
+        console.error('Failed to download image from URL:', error);
+        return;
+      }
+    } else {
+      console.error('No asset URL found');
+      return;
     }
+
+    // Here, we need to take our current photo, and modify it with our modify image endpoint.
+    // we will then upload the modified image to Hedra and obtain a new avatar ID.
+    // then, below, we will send the new avatar ID to the backend via LiveKit data channel.
+  
+    if (!blob) {
+      console.error('No original photo blob available');
+      return;
+    }
+    // const formData = new FormData();
+    // formData.append("image", blob, "photo.jpg");
+
+    // const response = await fetch("/api/enhance-image", {
+    //   method: "POST",
+    //   body: formData,
+    // });
+
+    // // Send avatar ID to backend via LiveKit data channel
+    // try {
+    //   await publishData('filter_selection', {
+    //     filterID: placeholderID,
+    //     timestamp: Date.now()
+    //   });
+    //   console.log('📡 Filter data sent to backend');
+    // } catch (error) {
+    //   console.error('Failed to send filter data:', error);
+    // }
     
     // Close the popover
     setFiltersEnabled(false);
