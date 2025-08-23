@@ -40,9 +40,9 @@ export default function Page() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
-      const enableVoiceCloning = urlParams.get('voiceCloning') === 'true' || 
-                                 urlParams.get('voice') === 'true' ||
-                                 window.location.hash.includes('voice');
+      const enableVoiceCloning = urlParams.get('voiceCloning') === 'true' ||
+        urlParams.get('voice') === 'true' ||
+        window.location.hash.includes('voice');
       setVoiceCloningEnabled(enableVoiceCloning);
       console.log('🎤 Voice cloning enabled:', enableVoiceCloning);
     }
@@ -89,7 +89,7 @@ export default function Page() {
 
       await room.connect(connectionDetailsData.serverUrl, connectionDetailsData.participantToken);
       await room.localParticipant.setMicrophoneEnabled(true);
-      
+
 
       // Make room available globally for mode switching
       (window as any).liveKitRoom = room;
@@ -609,7 +609,9 @@ function AvatarVisualControls() {
   const [personalityEnabled, setPersonalityEnabled] = useState(false);
   const [filtersEnabled, setFiltersEnabled] = useState(false);
   const [currentPersonalityIndex, setCurrentPersonalityIndex] = useState(0);
+  const [selectedPersonalityIndex, setSelectedPersonalityIndex] = useState(0); // Core personality is selected by default
   const [hasInteractedWithCarousel, setHasInteractedWithCarousel] = useState(false);
+  const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
   const personalityRef = useRef<HTMLButtonElement>(null);
   const filtersRef = useRef<HTMLButtonElement>(null);
   const { publishData } = useRoomData();
@@ -629,7 +631,7 @@ function AvatarVisualControls() {
   const handlePersonalitySelection = useCallback(async () => {
     const selectedPersonality = personalities[currentPersonalityIndex];
     console.log('🎭 Personality selected:', selectedPersonality.name);
-    
+
     // Send personality selection to backend via LiveKit data channel
     try {
       await publishData('personality_selection', {
@@ -640,34 +642,34 @@ function AvatarVisualControls() {
     } catch (error) {
       console.error('Failed to send personality data:', error);
     }
-    
-    // Close the popover and reset state
+
+    // Update selected personality and close the popover
+    setSelectedPersonalityIndex(currentPersonalityIndex);
     setPersonalityEnabled(false);
     setHasInteractedWithCarousel(false);
   }, [currentPersonalityIndex, personalities, publishData]);
 
   const handlePersonalityToggle = useCallback((toggled: boolean) => {
-    console.log('🔄 handlePersonalityToggle called:', { toggled, hasInteractedWithCarousel, personalityEnabled });
-    
-    if (hasInteractedWithCarousel && personalityEnabled) {
-      // User clicked "Use this" - handle personality selection regardless of toggled value
-      console.log('✅ Triggering personality selection');
-      handlePersonalitySelection();
-    } else {
-      setPersonalityEnabled(toggled);
-      console.log('Personality:', toggled ? 'enabled' : 'disabled');
-      
-      // Reset carousel interaction state when closing
-      if (!toggled) {
-        setHasInteractedWithCarousel(false);
-      }
+    console.log('🔄 handlePersonalityToggle called:', { toggled });
+
+    // Only open/close the popover - no personality selection logic
+    setPersonalityEnabled(toggled);
+    console.log('Personality:', toggled ? 'enabled' : 'disabled');
+
+    // Reset carousel interaction state when closing
+    if (!toggled) {
+      setHasInteractedWithCarousel(false);
     }
-  }, [hasInteractedWithCarousel, handlePersonalitySelection, personalityEnabled]);
+  }, []);
 
   const handleFiltersToggle = useCallback((toggled: boolean) => {
+    // Prevent closing if a filter is currently loading
+    if (!toggled && loadingFilter) {
+      return;
+    }
     setFiltersEnabled(toggled);
     console.log('Filters:', toggled ? 'enabled' : 'disabled');
-  }, []);
+  }, [loadingFilter]);
 
   const closePersonalityPopover = useCallback(() => {
     setPersonalityEnabled(false);
@@ -675,19 +677,25 @@ function AvatarVisualControls() {
   }, []);
 
   const closeFiltersPopover = useCallback(() => {
+    // Prevent closing if a filter is currently loading
+    if (loadingFilter) {
+      return;
+    }
     setFiltersEnabled(false);
-  }, []);
+  }, [loadingFilter]);
 
   const handleFilterSelection = useCallback(async (filterName: string) => {
-    
+    // Set loading state
+    setLoadingFilter(filterName);
+
     console.log('🎨 Filter selected:', filterName);
     const currentID = localStorage.getItem("hedraAssetId");
     console.log(currentID);
-    
+
     const assetResponse = await fetch(`/api/get-hedra-asset?id=${currentID}`);
     const assetResult = await assetResponse.json();
     const assetUrl = assetResult.data[0]?.asset?.url;
-    console.log('Asset URL:', assetUrl);    
+    console.log('Asset URL:', assetUrl);
 
     // Download the image from the URL and convert to blob
     let blob = null;
@@ -703,7 +711,7 @@ function AvatarVisualControls() {
           method: "POST",
           body: enhanceFormData,
         });
-        
+
         const enhanceResult = await enhanceResponse.json();
         console.log('Modified image result:', enhanceResult);
         if (enhanceResult.success) {
@@ -716,12 +724,12 @@ function AvatarVisualControls() {
           }
           const byteArray = new Uint8Array(byteNumbers);
           const enhancedBlob = new Blob([byteArray], { type: 'image/jpeg' });
-          
+
           console.log('Enhanced blob created:', enhancedBlob.size, 'bytes');
-          
+
           const avatarFormData = new FormData();
           avatarFormData.append("photo", enhancedBlob, "avatar-photo.jpg");
-          
+
           const avatarResponse = await fetch("/api/create-avatar", {
             method: "POST",
             body: avatarFormData,
@@ -757,7 +765,7 @@ function AvatarVisualControls() {
     // Here, we need to take our current photo, and modify it with our modify image endpoint.
     // we will then upload the modified image to Hedra and obtain a new avatar ID.
     // then, below, we will send the new avatar ID to the backend via LiveKit data channel.
-  
+
     if (!blob) {
       console.error('No original photo blob available');
       return;
@@ -780,9 +788,10 @@ function AvatarVisualControls() {
     // } catch (error) {
     //   console.error('Failed to send filter data:', error);
     // }
-    
-    // Close the popover
+
+    // Close the popover and clear loading state
     setFiltersEnabled(false);
+    setLoadingFilter(null);
   }, [publishData]);
 
   // Carousel navigation functions
@@ -814,20 +823,12 @@ function AvatarVisualControls() {
           isToggled={personalityEnabled}
           onToggle={handlePersonalityToggle}
           icon={<BrowseIcon size={32} />}
-          hideXmark={hasInteractedWithCarousel}
           className="w-[210px]"
         >
-          <motion.span
-            key={hasInteractedWithCarousel ? 'start' : 'personality'}
-            initial={{ opacity: 0.3 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-          >
-            {hasInteractedWithCarousel ? 'Start' : 'Personality'}
-          </motion.span>
+          Personality
         </Toggle>
         <Popover
-          width={380}
+          width={436}
           align="center"
           isOpen={personalityEnabled}
           onClose={closePersonalityPopover}
@@ -854,41 +855,49 @@ function AvatarVisualControls() {
                   src={currentPersonality.media}
                 />
               )}
+              <motion.button
+                onClick={goToPreviousPersonality}
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
 
-              {/* Dark overlay for text readability */}
-              {/* <div className="absolute inset-0 bg-black/40 rounded-[36px]"></div> */}
+                transition={{ duration: 0.1 }}
+                style={{ transformOrigin: 'center' }}
+              >
+                <ChevronIcon size={32} />
+              </motion.button>
 
-              {/* Content overlay */}
+              <motion.button
+                onClick={goToNextPersonality}
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
+
+                transition={{ duration: 0.1 }}
+                style={{ transformOrigin: 'center' }}
+              >
+                <ChevronIcon size={32} className="rotate-180" />
+              </motion.button>
               <motion.div
-                className="absolute bottom-0 left-0 right-0 z-10 flex flex-col justify-end items-center text-center px-12 pb-6"
+                className="absolute bottom-0 left-0 right-0 z-10 flex flex-row justify-start gap-4 items-end p-[28px]"
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 transition={{ duration: 0.3, ease: "easeOut" }}
               >
-                <div className="text-white text-xl font-bold leading-8 mb-1 drop-shadow-lg">{currentPersonality.name}</div>
-                <div className="text-white/50 text-base font-normal leading-6 max-w-xs drop-shadow-md">
-                  {currentPersonality.subtitle}
+                <div className="flex flex-col w-full">
+                  <div className="text-white text-xl font-bold leading-8">{currentPersonality.name}</div>
+                  <div className="text-white/50 text-base font-normal leading-6 ">
+                    {currentPersonality.subtitle}
+                  </div>
                 </div>
-                <motion.button
-                  onClick={goToPreviousPersonality}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
 
-                  transition={{ duration: 0.1 }}
-                  style={{ transformOrigin: 'center' }}
-                >
-                  <ChevronIcon size={32} />
-                </motion.button>
+                {currentPersonalityIndex !== selectedPersonalityIndex && (
+                  <Button width="144px" height="60px"
+                    onClick={handlePersonalitySelection}
+                    className="w-[144px] h-[60px] bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-2 rounded-full text-xl font-medium transition-colors"
+                  >
+                    Use this
+                  </Button>
+                )}
 
-                <motion.button
-                  onClick={goToNextPersonality}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
 
-                  transition={{ duration: 0.1 }}
-                  style={{ transformOrigin: 'center' }}
-                >
-                  <ChevronIcon size={32} className="rotate-180" />
-                </motion.button>
               </motion.div>
             </motion.div>
 
@@ -915,26 +924,55 @@ function AvatarVisualControls() {
           onClose={closeFiltersPopover}
           triggerRef={filtersRef}
         >
+          <style dangerouslySetInnerHTML={{
+            __html: `
+              @keyframes gradientShift {
+                0% {
+                  background-position: 100% 50%;
+                }
+                100% {
+                  background-position: 0% 50%;
+                }
+              }
+              .gradient-loading {
+                background: linear-gradient(90deg, #00ACFF, #016CFF, #6EDCFF, #00ACFF, #016CFF, #6EDCFF, #00ACFF);
+                background-size: 200% 100%;
+                animation: gradientShift 1.5s linear infinite;
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+              }
+            `
+          }} />
           <div className="w-full flex flex-col justify-center items-center overflow-hidden rounded-[36px]">
-            <div 
-              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]"
+            <div
+              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]"
               onClick={() => handleFilterSelection('Add a funny hat')}
             >
-              <div className="justify-start text-white text-xl font-normal leading-7">Add a funny hat</div>
+              <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Add a funny hat'
+                  ? 'gradient-loading'
+                  : 'text-white'
+                }`}>Add a funny hat</div>
             </div>
             <div className="w-full h-px relative bg-neutral-100/10"></div>
-            <div 
-              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer"
+            <div
+              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 transition-colors cursor-pointer"
               onClick={() => handleFilterSelection('Make me Pixar style')}
             >
-              <div className="justify-start text-white text-xl font-normal leading-7">Make me Pixar style</div>
+              <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Make me Pixar style'
+                  ? 'gradient-loading'
+                  : 'text-white'
+                }`}>Make me Pixar style</div>
             </div>
             <div className="w-full h-px relative bg-neutral-100/10"></div>
-            <div 
-              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 hover:bg-white/5 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]"
+            <div
+              className="w-full h-16 px-6 inline-flex justify-start items-center gap-3 transition-colors cursor-pointer first:rounded-t-[36px] last:rounded-b-[36px]"
               onClick={() => handleFilterSelection('Give me studio lighting')}
             >
-              <div className="justify-start text-white text-xl font-normal leading-7">Give me studio lighting</div>
+              <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Give me studio lighting'
+                  ? 'gradient-loading'
+                  : 'text-white'
+                }`}>Give me studio lighting</div>
             </div>
           </div>
         </Popover>
@@ -976,7 +1014,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       console.log('🎥 Calling photoCaptureRef.current.startCamera()');
       photoCaptureRef.current.startCamera();
       console.log('🎥 startCamera() called successfully');
-      
+
       // Inform backend about state change
       const room = (window as { liveKitRoom?: Room }).liveKitRoom;
       if (room) {
@@ -990,7 +1028,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
           console.error('Failed to send state change to backend:', error);
         }
       }
-      
+
       return JSON.stringify("Camera started");
     }
     console.log('🎥 ERROR: Photo capture component not available');
