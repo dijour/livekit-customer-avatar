@@ -767,8 +767,6 @@ class Orchestrator:
             
             # Debug: Print TTS info after successful avatar start
             print(f"🔍 TTS Debug - session._tts: {self.session._tts}")
-            
-            print(f"🔍 About to call session.say() with message: 'I've applied the {filter_id} filter!'")
             speech_handle = self.session.say(f"I've applied the filter!")
             print(f"🔍 session.say() returned speech_handle: {speech_handle}")
             

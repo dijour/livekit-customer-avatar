@@ -612,8 +612,11 @@ function AvatarVisualControls() {
   const [selectedPersonalityIndex, setSelectedPersonalityIndex] = useState(0); // Core personality is selected by default
   const [hasInteractedWithCarousel, setHasInteractedWithCarousel] = useState(false);
   const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
+  const [filterCooldownRemaining, setFilterCooldownRemaining] = useState(30); // Start with 30 second cooldown
+  const [isFilterCooldownActive, setIsFilterCooldownActive] = useState(true); // Start locked when avatar first appears
   const personalityRef = useRef<HTMLButtonElement>(null);
   const filtersRef = useRef<HTMLButtonElement>(null);
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { publishData } = useRoomData();
 
   // Personality carousel data
@@ -628,6 +631,46 @@ function AvatarVisualControls() {
   ];
   const { state } = useAvatarSetup();
   const blob = state.userPhoto; // This is your original photo blob
+
+  // Start cooldown timer function
+  const startFilterCooldown = useCallback(() => {
+    setIsFilterCooldownActive(true);
+    setFilterCooldownRemaining(30);
+    
+    // Clear any existing timer
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+    }
+    
+    // Start countdown
+    cooldownTimerRef.current = setInterval(() => {
+      setFilterCooldownRemaining((prev) => {
+        if (prev <= 1) {
+          setIsFilterCooldownActive(false);
+          if (cooldownTimerRef.current) {
+            clearInterval(cooldownTimerRef.current);
+            cooldownTimerRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  // Start initial cooldown when component mounts (avatar first appears)
+  useEffect(() => {
+    startFilterCooldown();
+  }, [startFilterCooldown]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+      }
+    };
+  }, []);
   const handlePersonalitySelection = useCallback(async () => {
     const selectedPersonality = personalities[currentPersonalityIndex];
     console.log('🎭 Personality selected:', selectedPersonality.name);
@@ -663,13 +706,17 @@ function AvatarVisualControls() {
   }, []);
 
   const handleFiltersToggle = useCallback((toggled: boolean) => {
+    // Prevent opening if cooldown is active
+    if (toggled && isFilterCooldownActive) {
+      return;
+    }
     // Prevent closing if a filter is currently loading
     if (!toggled && loadingFilter) {
       return;
     }
     setFiltersEnabled(toggled);
     console.log('Filters:', toggled ? 'enabled' : 'disabled');
-  }, [loadingFilter]);
+  }, [loadingFilter, isFilterCooldownActive]);
 
   const closePersonalityPopover = useCallback(() => {
     setPersonalityEnabled(false);
@@ -771,6 +818,9 @@ function AvatarVisualControls() {
               timestamp: Date.now()
             });
             console.log('📡 Filter data sent to backend');
+            
+            // Start cooldown after successful filter application
+            startFilterCooldown();
           } catch (error) {
             console.error('Failed to send filter data:', error);
           }
@@ -815,7 +865,7 @@ function AvatarVisualControls() {
     // Close the popover and clear loading state
     setFiltersEnabled(false);
     setLoadingFilter(null);
-  }, [publishData]);
+  }, [publishData, startFilterCooldown]);
 
   // Carousel navigation functions
   const goToPreviousPersonality = useCallback(() => {
@@ -932,13 +982,14 @@ function AvatarVisualControls() {
 
       <div className="relative">
         <Toggle
-
           ref={filtersRef}
           isToggled={filtersEnabled}
           onToggle={handleFiltersToggle}
           icon={<PreferencesIcon size={32} />}
+          disabled={isFilterCooldownActive}
+          className={isFilterCooldownActive ? "opacity-50 cursor-not-allowed" : ""}
         >
-          Filters
+          {isFilterCooldownActive ? `Filters (${filterCooldownRemaining}s)` : "Filters"}
         </Toggle>
         <Popover
           width={300}
