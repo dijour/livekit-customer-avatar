@@ -685,6 +685,29 @@ function AvatarVisualControls() {
   }, [loadingFilter]);
 
   const handleFilterSelection = useCallback(async (filterName: string) => {
+    // Send immediate message to agent that filter process is starting
+    try {
+      // Create a message based on the filter type
+      const filterMessages: Record<string, string> = {
+        "add a funny hat": "Got it, I'm adding a funny hat. Please hold!",
+        "make me pixar style": "Got it, I'm transforming into Pixar style. Please hold!",
+        "give me studio lighting": "Got it, I'm creating an oil painting version of myself. Please hold!"
+      };
+      
+      // Default message if filter type isn't in our predefined list
+      const lowerCaseFilterName = filterName.toLowerCase();
+      const message = filterMessages[lowerCaseFilterName] || 
+        `Got it. I'll have a new appearance very soon. Please hold.`;
+      
+      await publishData('agent_message', {
+        message,
+        filterName,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error('Failed to send agent message:', error);
+    }
+
     // Set loading state
     setLoadingFilter(filterName);
 

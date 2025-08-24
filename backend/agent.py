@@ -662,6 +662,13 @@ class Orchestrator:
                     message = json.loads(pkt.data.decode("utf-8"))
                     self.voice_cloning_enabled = message.get("voiceCloningEnabled", False)
                     print(f"🎤 Received voice cloning preference via room data: {self.voice_cloning_enabled}")
+                elif pkt.topic == "agent_message":
+                    print(f"🎤 Received agent message via room data: {pkt.data.decode('utf-8')}")
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    agent_message = message.get("message")
+                    if agent_message and self.session:
+                        print(f"🗣️ Agent speaking immediate message: {agent_message}")
+                        asyncio.create_task(self._speak_agent_message(agent_message))
                 elif pkt.topic == "filter_selection":
                     message = json.loads(pkt.data.decode("utf-8"))
                     filter_id = message.get("filterID")
@@ -709,6 +716,14 @@ class Orchestrator:
                 print(f"❌ data_received error: {e}")
 
     # ---- Helper methods ----
+    async def _speak_agent_message(self, message: str) -> None:
+        """Speak an agent message properly handling the SpeechHandle."""
+        try:
+            speech_handle = self.session.say(message)
+            await speech_handle.wait_for_completion()
+        except Exception as e:
+            print(f"⚠️ Failed to speak agent message: {e}")
+
     async def _apply_filter(self, filter_id: str) -> None:
         """Apply a filter effect by replacing the avatar with a placeholder"""
         try:
