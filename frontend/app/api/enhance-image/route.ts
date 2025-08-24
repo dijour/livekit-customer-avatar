@@ -155,13 +155,19 @@ export async function POST(request: NextRequest) {
       console.error("OpenAI API error details:", (error as any).error);
     }
     
+    // Check if this is a safety system rejection
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isSafetyRejection = errorMessage.includes("rejected by the safety system") || 
+                             errorMessage.includes("safety system");
+    
     return NextResponse.json(
       { 
         error: "Failed to enhance image", 
-        details: error instanceof Error ? error.message : "Unknown error",
-        type: error?.constructor?.name || "Unknown"
+        details: errorMessage,
+        type: error?.constructor?.name || "Unknown",
+        isSafetyRejection
       },
-      { status: 500 }
+      { status: isSafetyRejection ? 400 : 500 }
     );
   }
 }

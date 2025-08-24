@@ -826,6 +826,24 @@ function AvatarVisualControls() {
           }
         }
 
+        if (!enhanceResponse.ok) {
+          // Handle enhancement errors, especially safety rejections
+          console.error('Image enhancement failed:', enhanceResult);
+          
+          try {
+            await publishData('filter_error', {
+              errorType: enhanceResult.type || 'Unknown',
+              errorDetails: enhanceResult.details || 'Unknown error',
+              isSafetyRejection: enhanceResult.isSafetyRejection || false,
+              timestamp: Date.now()
+            });
+            console.log('📡 Filter error data sent to backend');
+          } catch (error) {
+            console.error('Failed to send filter error data:', error);
+          }
+          return;
+        }
+
       } catch (error) {
         console.error('Failed to download image from URL:', error);
         return;

@@ -714,6 +714,12 @@ class Orchestrator:
                         print(f"🎭 Received avatar ID via avatar_data: {avatar_id}")
                         # Store immediately without waiting for mode switch
                         asyncio.create_task(self._store_avatar_id_in_room(avatar_id))
+                elif pkt.topic == "filter_error":
+                    message = json.loads(pkt.data.decode("utf-8"))
+                    error_type = message.get("errorType")
+                    error_details = message.get("errorDetails", "")
+                    print(f"🚨 Received filter error via room data: {error_type}")
+                    asyncio.create_task(self._handle_filter_error(error_type, error_details))                        
                 elif pkt.topic == "user_state_change":
                     message = json.loads(pkt.data.decode("utf-8"))
                     action = message.get("action")
@@ -737,6 +743,15 @@ class Orchestrator:
             await speech_handle.wait_for_completion()
         except Exception as e:
             print(f"⚠️ Failed to speak agent message: {e}")
+
+    async def _handle_filter_error(self, error_type: str, error_details: str) -> None:
+        """Handle filter generation errors and provide appropriate responses"""
+        if "safety system" in error_details.lower() or "rejected by the safety system" in error_details.lower():
+            await self.session.say("For content safety reasons, your requested filter could not be generated. Please try again.")
+        elif "400" in error_details or "BadRequestError" in error_type:
+            await self.session.say("I wasn't able to generate that filter. Let's try a different one!")
+        else:
+            await self.session.say("Something went wrong while applying your filter. Please try again.")
 
     async def _apply_filter(self, filter_id: str) -> None:
         """Apply a filter effect by replacing the avatar with a placeholder"""
