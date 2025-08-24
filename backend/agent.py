@@ -22,7 +22,7 @@ from typing import AsyncIterable, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from livekit import agents, rtc
+from livekit import agents, rtc, api
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -548,12 +548,15 @@ class Orchestrator:
         self._cleanup_registered = False  # track if cleanup is registered
         self.voice_cloning_enabled = False  # store voice cloning preference
         self.agent: Optional[Assistant] = None
+        self.room_service: Optional[api.RoomService] = None
 
     # ---- Session setup ----
     async def start(self) -> None:
         print("🚀 Starting orchestrator…")
         llm = openai.LLM(model=self.cfg.llm_model, temperature=0.7)
-
+        lkapi = api.LiveKitAPI()
+        room_service = lkapi.room
+        self.room_service = room_service
         # Build session
         self.session = AgentSession(
             stt=deepgram.STT(model=self.cfg.deepgram_model, language="multi"),
@@ -654,6 +657,15 @@ class Orchestrator:
             print(f"🔗 participant_connected: {p.identity}")
             if self.current_mode_is_alexa:
                 asyncio.create_task(self._alexa_greeting())
+
+        @self.ctx.room.on("participant_disconnected")
+        def _on_participant_disconnected(p: rtc.RemoteParticipant):
+            print(f"🔗 participant_disconnected: {p.identity}")
+            if (p.identity.startswith("hedra-avatar") == False):
+                print("User disconnected, cleaning up voices...")
+                if (self.cloner):
+                    asyncio.create_task(self.cloner.cleanup_voices())
+            
         
         @self.ctx.room.on("data_received")
         def _on_data(pkt: rtc.DataPacket):
@@ -662,6 +674,8 @@ class Orchestrator:
                     message = json.loads(pkt.data.decode("utf-8"))
                     self.voice_cloning_enabled = message.get("voiceCloningEnabled", False)
                     print(f"🎤 Received voice cloning preference via room data: {self.voice_cloning_enabled}")
+            
+
                 elif pkt.topic == "agent_message":
                     print(f"🎤 Received agent message via room data: {pkt.data.decode('utf-8')}")
                     message = json.loads(pkt.data.decode("utf-8"))
@@ -727,25 +741,42 @@ class Orchestrator:
     async def _apply_filter(self, filter_id: str) -> None:
         """Apply a filter effect by replacing the avatar with a placeholder"""
         try:
-            # previous_avatar_id = self._get_avatar_id_from_polling_state()
-            # url = "https://api.hedra.com/web-app/public/assets"
-            # headers = {"X-API-Key": os.getenv("HEDRA_API_KEY")}
-            # querystring = {"type":"image","ids":previous_avatar_id}
-            # response = requests.get(url, headers=headers, params=querystring)
-            # url = response.json()[0]["asset"]["url"]
-            
-            
-            #this overwrites the avatar with a placeholder
-            # placeholder_avatar_id = "0396e7f6-252a-4bd8-8f41-e8d1ecd6367e"
+            response = await self.ctx.api.room.list_participants(
+                api.ListParticipantsRequest(room=self.ctx.room.name)
+            )
+            participants = response.participants
+            for participant in participants:
+                print(f"🔍 Participant: {participant}")
+                if (participant.identity.startswith("hedra-avatar")):
+                    print(f"🔍 Found Hedra avatar: {participant.identity}")
+                    await self.room_service.remove_participant(
+                        api.RoomParticipantIdentity(
+                            room=self.ctx.room.name,
+                            identity=participant.identity
+                        )
+                    )
+                    # self.ctx.room.remove_participant(participant.identity)
+
+            # Create new avatar session with filter (Hedra handles session replacement automatically)
+
             self.avatar = hedra.AvatarSession(
                 avatar_id=filter_id,
-                avatar_participant_identity="hedra-avatar",
+                avatar_participant_identity="hedra-avatar"+filter_id,
             )
             await self.avatar.start(self.session, room=self.ctx.room)
-            print(f"🎨 Filter avatar session started with placeholder ID")
             
-            # Announce the filter change
-            await self.session.say(f"I've applied the {filter_id} filter!")
+            # Debug: Print TTS info after successful avatar start
+            print(f"🔍 TTS Debug - session._tts: {self.session._tts}")
+            
+            print(f"🔍 About to call session.say() with message: 'I've applied the {filter_id} filter!'")
+            speech_handle = self.session.say(f"I've applied the filter!")
+            print(f"🔍 session.say() returned speech_handle: {speech_handle}")
+            
+            print(f"🔍 About to await speech_handle...")
+            await speech_handle
+            print(f"🔍 speech_handle await completed successfully")
+            
+            print(f"🎨 Filter avatar session started with ID: {filter_id}")
         except Exception as e:
             print(f"⚠️ Failed to apply filter {filter_id}: {e}")
             # Try to recover by restarting the original avatar session if needed
@@ -1008,17 +1039,18 @@ async def show_photo_capture_ui(ctx: JobContext) -> str:
 # Entrypoint
 # ---------------------------
 async def entrypoint(ctx: JobContext):
+    
     orch = Orchestrator(ctx, Config())
     await orch.start()
-    async def async_shutdown_callback(participant: rtc.Participant):
-        print("Shutting down...")
-        if orch.cloner:
-            await orch.cloner.cleanup_voices()
+    # async def async_shutdown_callback(participant: rtc.Participant):
+    #     print("Shutting down...")
+        # if orch.cloner:
+        #     await orch.cloner.cleanup_voices()
     
-    def shutdown_callback(participant: rtc.Participant):
-        asyncio.create_task(async_shutdown_callback(participant))
+    # def shutdown_callback(participant: rtc.Participant):
+    #     asyncio.create_task(async_shutdown_callback(participant))
     
-    ctx.room.on("participant_disconnected", shutdown_callback)
+    # ctx.room.on("participant_disconnected", shutdown_callback)
     while True:
         await asyncio.sleep(3600)
 

@@ -691,7 +691,7 @@ function AvatarVisualControls() {
       const filterMessages: Record<string, string> = {
         "add a funny hat": "Got it, I'm adding a funny hat. Please hold!",
         "make me pixar style": "Got it, I'm transforming into Pixar style. Please hold!",
-        "give me studio lighting": "Got it, I'm creating an oil painting version of myself. Please hold!"
+        "give me studio lighting": "Got it, I'll apply studio lighting. Please hold!"
       };
       
       // Default message if filter type isn't in our predefined list
