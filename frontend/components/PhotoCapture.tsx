@@ -7,28 +7,23 @@ import { MaskedMediaView } from "./MaskedMediaView";
 interface PhotoCaptureProps {
   onPhotoCapture: (photoBlob: Blob) => void;
   onSkip: () => void;
-  onStateChange?: (state: { isStreaming: boolean; capturedPhoto: boolean; currentStep: 'capture' | 'enhance' | 'confirm' }) => void;
+  onStateChange?: (state: { isStreaming: boolean; capturedPhoto: boolean }) => void;
   onShowAlexaTransition?: () => void;
 }
 
 export interface PhotoCaptureRef {
   startCamera: () => void;
   capturePhoto: () => void;
-  enhancePhoto: () => void;
-  useOriginalPhoto: () => void;
   retakePhoto: () => void;
 }
 
-const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCapture, onStateChange, onShowAlexaTransition }, ref) => {
+const PhotoCapture = forwardRef<PhotoCaptureRef | null, PhotoCaptureProps>(({ onPhotoCapture, onStateChange, onShowAlexaTransition }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
-  const [enhancedPhoto, setEnhancedPhoto] = useState<string | null>(null);
-  const [isEnhancing, setIsEnhancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
   
   // Feature flag: enable full workflow only if URL contains #modify
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
@@ -83,7 +78,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       
       setStream(mediaStream);
       setIsStreaming(true);
-      onStateChange?.({ isStreaming: true, capturedPhoto: !!capturedPhoto, currentStep });
+      onStateChange?.({ isStreaming: true, capturedPhoto: !!capturedPhoto });
       console.log('🎥 PhotoCapture: Camera started successfully');
     } catch (err: unknown) {
       console.error("🎥 PhotoCapture ERROR accessing camera:", err);
@@ -115,7 +110,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         protocol: window.location.protocol
       });
     }
-  }, [capturedPhoto, currentStep, onStateChange]);
+  }, [capturedPhoto, onStateChange]);
 
   // Use useEffect to set up video when stream and isStreaming change
   React.useEffect(() => {
@@ -156,106 +151,28 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
         const photoUrl = URL.createObjectURL(blob);
         setCapturedPhoto(photoUrl);
         stopCamera();
-        onStateChange?.({ isStreaming: false, capturedPhoto: true, currentStep });
+        onStateChange?.({ isStreaming: false, capturedPhoto: true });
         
-        // If not in modify mode, automatically proceed to avatar creation
-        if (!isModifyMode) {
-          // Show Alexa transition overlay
-          onShowAlexaTransition?.();
-          // Directly call onPhotoCapture with the blob to skip all confirmation screens
-          onPhotoCapture(blob);
-        }
+        // Always proceed to avatar creation immediately
+        onShowAlexaTransition?.();
+        onPhotoCapture(blob);
       }
     }, "image/jpeg", 0.8);
-  }, [stopCamera, isModifyMode, onPhotoCapture, onStateChange, currentStep, onShowAlexaTransition]);
+  }, [stopCamera, onPhotoCapture, onStateChange, onShowAlexaTransition]);
 
   const retakePhoto = useCallback(() => {
     console.log("📸 PhotoCapture: retakePhoto called");
     setCapturedPhoto(null);
-    setEnhancedPhoto(null);
-    setCurrentStep('capture');
     startCamera();
   }, [startCamera]);
 
-  const useOriginalPhoto = useCallback(() => {
-    console.log("📸 PhotoCapture: useOriginalPhoto called");
-    setCurrentStep('confirm');
-  }, []);
-
-  const enhancePhoto = useCallback(async () => {
-    console.log("🎨 PhotoCapture: enhancePhoto called");
-    if (!canvasRef.current) {
-      console.log("🎨 PhotoCapture: No canvas available");
-      return;
-    }
-
-    setIsEnhancing(true);
-    setError(null);
-
-    try {
-      // Convert canvas to blob for upload
-      const blob = await new Promise<Blob>((resolve) => {
-        canvasRef.current!.toBlob((blob) => {
-          if (blob) {
-            console.log("🎨 PhotoCapture: Blob created for enhancement:", {
-              size: blob.size,
-              type: blob.type
-            });
-            resolve(blob);
-          }
-        }, "image/jpeg", 0.8);
-      });
-
-      console.log("🎨 PhotoCapture: Sending blob to API, size:", blob.size);
-
-      // Create form data for API call
-      const formData = new FormData();
-      formData.append("image", blob, "photo.jpg");
-
-      // Call OpenAI enhancement API
-      const response = await fetch("/api/enhance-image", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Enhancement failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.success && result.enhancedImage) {
-        // Convert base64 to blob URL for display
-        const enhancedImageBlob = new Blob(
-          [Uint8Array.from(atob(result.enhancedImage), c => c.charCodeAt(0))],
-          { type: "image/png" }
-        );
-        const enhancedUrl = URL.createObjectURL(enhancedImageBlob);
-        setEnhancedPhoto(enhancedUrl);
-        setCurrentStep('confirm');
-        console.log("🎨 PhotoCapture: Enhancement completed successfully");
-      } else {
-        throw new Error("No enhanced image received");
-      }
-    } catch (error) {
-      console.error("🎨 PhotoCapture: Enhancement failed:", error);
-      setError("Failed to enhance image. Using original photo instead.");
-      // Fall back to original photo
-      setCurrentStep('confirm');
-    } finally {
-      setIsEnhancing(false);
-      stopCamera();
-    }
-  }, [stopCamera]);
 
   // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     startCamera,
     capturePhoto,
-    enhancePhoto,
-    useOriginalPhoto,
     retakePhoto
-  }), [startCamera, capturePhoto, enhancePhoto, useOriginalPhoto, retakePhoto]);
+  }), [startCamera, capturePhoto, retakePhoto]);
 
   // Cleanup on unmount
   React.useEffect(() => {
@@ -264,11 +181,8 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
       if (capturedPhoto) {
         URL.revokeObjectURL(capturedPhoto);
       }
-      if (enhancedPhoto) {
-        URL.revokeObjectURL(enhancedPhoto);
-      }
     };
-  }, [stopCamera, capturedPhoto, enhancedPhoto]);
+  }, [stopCamera, capturedPhoto]);
 
   return (
     <div className="h-screen flex flex-col">
@@ -284,31 +198,7 @@ const PhotoCapture = forwardRef<PhotoCaptureRef, PhotoCaptureProps>(({ onPhotoCa
           {/* Photo preview area */}
           <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
           <div className="w-full h-full">
-            {currentStep === 'confirm' && enhancedPhoto ? (
-              <MaskedMediaView>
-                <img
-                  src={enhancedPhoto}
-                  alt="Enhanced photo"
-                  className="w-full h-full object-cover"
-                />
-              </MaskedMediaView>
-            ) : capturedPhoto ? (
-              <MaskedMediaView
-                overlay={isEnhancing ? (
-                  <div className="px-4 py-2">
-                    <div className="text-white text-center">
-                      <p>Enhancing</p>
-                    </div>
-                  </div>
-                ) : undefined}
-              >
-                <img
-                  src={capturedPhoto}
-                  alt="Captured photo"
-                  className="w-full h-full object-cover"
-                />
-              </MaskedMediaView>
-            ) : isStreaming ? (
+            {isStreaming ? (
               <div className="w-full h-full flex items-center justify-center">
                 <div className="w-[min(60vh,60vw)] h-[min(60vh,60vw)] rounded-full overflow-hidden">
                   <video

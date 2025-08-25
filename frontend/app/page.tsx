@@ -341,85 +341,6 @@ export default function Page() {
       <RoomContext.Provider value={room as RoomContextType}>
 
 
-        {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
-        <AnimatePresence mode="wait">
-          {(!avatarSetup.state.assetId || avatarSetup.showPhotoCapture) && (
-            <PhotoCapture
-              key="photo-capture"
-              ref={photoCaptureRef}
-              onPhotoCapture={avatarSetup.handlePhotoCapture}
-              onSkip={avatarSetup.handleSkipPhoto}
-              onShowAlexaTransition={() => {
-                console.log('🎬 PhotoCapture triggered Alexa transition');
-                setShowAlexaTransition(true);
-              }}
-              onStateChange={(state) => {
-                // Update PhotoCaptureControls state when PhotoCapture state changes
-                if (photoCaptureRef.current) {
-                  // Find and update the PhotoCaptureControls component state
-                  const event = new CustomEvent('photoCaptureStateChange', { detail: state });
-                  window.dispatchEvent(event);
-                }
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* Alexa transition video overlay during avatar generation */}
-        <AnimatePresence>
-          {showAlexaTransition && (
-            <motion.div
-              key="alexa-transition"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.5 }}
-              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center"
-            >
-              <div className="relative w-full h-full flex items-center justify-center">
-                {!showAvatarAppears ? (
-                  // Phase 1: Loop transition video until avatar is ready
-                  <video
-                    autoPlay
-                    loop
-                    muted
-                    className="w-auto h-auto max-w-full max-h-full object-contain"
-                    onLoadStart={() => console.log('🎬 Alexa transition video loading...')}
-                    onCanPlay={() => console.log('🎬 Alexa transition video can play')}
-                    onError={(e) => console.error('🎬 Alexa transition video error:', e)}
-                  >
-                    <source src="/videos/alexa_transition.mp4" type="video/mp4" />
-                  </video>
-                ) : (
-                  // Phase 2: Play avatar appears video once
-                  <video
-                    autoPlay
-                    muted
-                    className="w-auto h-auto max-w-full max-h-full object-contain"
-                    onEnded={() => {
-                      // Fade out the entire overlay after avatar appears video ends
-                      setTimeout(() => {
-                        setShowAlexaTransition(false);
-                        setShowAvatarAppears(false);
-                      }, 500);
-                    }}
-                  >
-                    <source src="/videos/avatar_appears.mp4" type="video/mp4" />
-                  </video>
-                )}
-                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white text-center">
-                  <p className="text-lg font-medium">
-                    {!showAvatarAppears ? "Creating your personalized avatar..." : "Your avatar is ready!"}
-                  </p>
-                  <p className="text-sm opacity-75 mt-2">
-                    {!showAvatarAppears ? "This will just take a moment" : "Welcome to your personalized experience"}
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Always show voice assistant for agent connection */}
         <SimpleVoiceAssistant
           onConnectButtonClicked={onConnectButtonClicked}
@@ -429,6 +350,7 @@ export default function Page() {
           showPhotoCaptureButton={showPhotoCaptureButton}
           avatarExists={!!avatarSetup.state.assetId}
           onShowAlexaTransition={() => setShowAlexaTransition(true)}
+          avatarSetup={avatarSetup}
         />
 
         {/* Error notification */}
@@ -460,6 +382,7 @@ function SimpleVoiceAssistant(props: {
   showPhotoCaptureButton: boolean;
   avatarExists: boolean;
   onShowAlexaTransition: () => void;
+  avatarSetup: any;
 }) {
   const { state: agentState } = useVoiceAssistant();
   const { localParticipant } = useLocalParticipant();
@@ -478,22 +401,54 @@ function SimpleVoiceAssistant(props: {
     setShowCaptions(!showCaptions);
   }, [showCaptions]);
 
+    // Log agent state changes
+    useEffect(() => {
+      console.log('🤖 Agent State Changed:', agentState);
+      console.log('🤖 Agent State Details:', {
+        state: agentState,
+        timestamp: new Date().toISOString(),
+        avatarExists: props.avatarExists,
+        isAutoConnecting: props.isAutoConnecting
+      });
+    }, [agentState, props.avatarExists, props.isAutoConnecting]);
+
+    // Log when avatarExists becomes true
+    useEffect(() => {
+      if (props.avatarExists) {
+        console.log('🤖 Avatar exists is now true - avatar is ready!');
+      }
+    }, [props.avatarExists]);
   return (
     <div className="h-screen flex flex-col relative">
+      {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
+      <AnimatePresence mode="wait">
+        {(!props.avatarSetup.state.assetId || props.avatarSetup.showPhotoCapture) && (
+          <PhotoCapture
+            key="photo-capture"
+            ref={props.photoCaptureRef}
+            onPhotoCapture={props.avatarSetup.handlePhotoCapture}
+            onSkip={props.avatarSetup.handleSkipPhoto}
+            // onShowAlexaTransition={() => {
+            //   console.log('🎬 PhotoCapture triggered Alexa transition');
+            //   setShowAlexaTransition(true);
+            // }}
+            onStateChange={(state) => {
+              // Update PhotoCaptureControls state when PhotoCapture state changes
+              if (props.photoCaptureRef.current) {
+                // Find and update the PhotoCaptureControls component state
+                const event = new CustomEvent('photoCaptureStateChange', { detail: state });
+                window.dispatchEvent(event);
+              }
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {agentState !== "disconnected" && (
           <>
-            {/* Main content area - shows agent visualizer when connected */}
             <div className="flex-1 flex items-center justify-center">
-              <motion.div
-                key="connected"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3, ease: [0.09, 1.04, 0.245, 1.055] }}
-              >
-                <AgentVisualizer />
-              </motion.div>
+              <AgentVisualizer avatarExists={props.avatarExists}/>
             </div>
 
             {/* Photo capture top control bar */}
@@ -571,10 +526,20 @@ function SimpleVoiceAssistant(props: {
   );
 }
 
-function AgentVisualizer() {
+function AgentVisualizer(props: { avatarExists: boolean }) {
   const { videoTrack } = useVoiceAssistant();
+  // if (props.avatarExists && !videoTrack) {
+  //   return (
+  //     <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto bg-red-500" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
+  //       <MaskedMediaView
+  //       </MaskedMediaView>
+  //     </div>
+  //   );  
+  // }
+  // else 
   if (videoTrack) {
     return (
+      
       <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
         <MaskedMediaView>
           <VideoTrack trackRef={videoTrack} />
@@ -582,8 +547,11 @@ function AgentVisualizer() {
       </div>
     );
   }
-  // No audio visualization - return null when no video
-  return null;
+  else {
+    return (
+      null
+    );
+  }
 }
 
 
@@ -1128,23 +1096,6 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
     }
   }, [photoCaptureRef]);
 
-  const enhancePhoto = useCallback(() => {
-    console.log("🎨 PhotoCaptureControls: Calling PhotoCapture.enhancePhoto");
-    if (photoCaptureRef.current?.enhancePhoto) {
-      photoCaptureRef.current.enhancePhoto();
-    } else {
-      console.log("🎨 ERROR: PhotoCapture enhancePhoto method not available");
-    }
-  }, [photoCaptureRef]);
-
-  const useOriginalPhoto = useCallback(() => {
-    console.log("📸 PhotoCaptureControls: Calling PhotoCapture.useOriginalPhoto");
-    if (photoCaptureRef.current?.useOriginalPhoto) {
-      photoCaptureRef.current.useOriginalPhoto();
-    } else {
-      console.log("📸 ERROR: PhotoCapture useOriginalPhoto method not available");
-    }
-  }, [photoCaptureRef]);
 
   return (
     <>
@@ -1173,30 +1124,11 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
             </Button>
           )}
 
-          {capturedPhoto && currentStep === 'capture' && isModifyMode && (
-            <>
-              <Button key="retake" onClick={retakePhoto}>
-                Retake
-              </Button>
-              <Button key="enhance" onClick={enhancePhoto}>
-                Add a hat
-              </Button>
-              <Button key="use-original" onClick={useOriginalPhoto}>
-                Use Original
-              </Button>
-            </>
-          )}
-
-          {currentStep === 'confirm' && isModifyMode && (
-            <>
-              <Button key="retake-confirm" onClick={retakePhoto}>
-                Retake
-              </Button>
-              <Button key="confirm-final" onClick={useOriginalPhoto}>
-                Use This Photo
-              </Button>
-            </>
-          )}
+          {/* {capturedPhoto && currentStep === 'capture' && (
+            <Button key="retake" onClick={retakePhoto}>
+              Retake
+            </Button>
+          )} */}
         </AnimatePresence>
       </div>
     </>

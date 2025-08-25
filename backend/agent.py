@@ -428,8 +428,13 @@ class Assistant(Agent):
 
     # ---- Function Tools ----
     @function_tool()
+    async def generate_avatar(self, context: RunContext) -> str:
+        """Generate an avatar for the user (triggered by 'generate avatar')."""
+        return "I'm generating your avatar now. This might take a moment..."
+
+    @function_tool()
     async def start_camera(self, context: RunContext) -> str:
-        """Activate the user's camera for photo capture (triggered by 'start camera')."""
+        """Activate the user's camera for photo capture (triggered by 'start camera' or something similar)."""
         try:
             # Check if camera is already started
             if self.orchestrator.camera_started:
