@@ -755,7 +755,7 @@ function TopNavPersonalitySelector() {
               {currentPersonalityIndex !== selectedPersonalityIndex && (
                 <Button width="144px" height="60px"
                   onClick={handlePersonalitySelection}
-                  className="w-[144px] h-[60px] bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-2 rounded-full text-xl font-medium transition-colors"
+                  className="ml-4 w-[144px] h-[60px] bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-2 rounded-full text-xl font-medium transition-colors"
                 >
                   Use this
                 </Button>
@@ -846,15 +846,15 @@ function AvatarVisualControls() {
     try {
       // Create a message based on the filter type
       const filterMessages: Record<string, string> = {
-        "add a funny hat": "Got it, I'm adding a funny hat. Please hold!",
-        "make me pixar style": "Got it, I'm transforming into Pixar style. Please hold!",
-        "give me studio lighting": "Got it, I'll apply studio lighting. Please hold!"
+        "add a funny hat": "Got it, I'm adding a funny hat. This could take up to 30 seconds. Feel free to chat with me in the meantime.",
+        "make me pixar style": "Got it, I'm transforming into Pixar style.  This could take up to 30 seconds. Feel free to chat with me in the meantime.",
+        "give me studio lighting": "Got it, I'll apply studio lighting.  This could take up to 30 seconds. Feel free to chat with me in the meantime."
       };
 
       // Default message if filter type isn't in our predefined list
       const lowerCaseFilterName = filterName.toLowerCase();
       const message = filterMessages[lowerCaseFilterName] ||
-        `Got it. I'll have a new appearance very soon. Please hold.`;
+        `Got it. I'll have a new appearance very soon. This could take up to 30 seconds. Feel free to chat with me in the meantime.`;
 
       await publishData('agent_message', {
         message,
@@ -1013,7 +1013,7 @@ function AvatarVisualControls() {
   return (
     <div className="flex gap-4 relative">
 
-        <Button
+        {/* <Button
           ref={filtersRef}
           onClick={() => handleFilterSelection('Add a funny hat')}
         >
@@ -1024,7 +1024,7 @@ function AvatarVisualControls() {
           onClick={() => handleFilterSelection('Make me a cartoon')}
         >
           "Make me a cartoon"
-        </Button>
+        </Button> */}
         
         {/* <Toggle
           ref={filtersRef}
@@ -1104,9 +1104,27 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
   const [error] = useState<string | null>(null);
+  const { publishData } = useRoomData();
 
   // Feature flag: enable full workflow only if URL contains #modify
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
+
+  const handleDescribeImageRequest = useCallback(async () => {
+    console.log('🎥Frontend Button Clicked: handleDescribeImageRequest called');
+    
+    try {
+      // Send a message to the agent to prompt the user for avatar description
+      await publishData('agent_message', {
+        message: "I'd love to help you create a custom avatar! Please describe what kind of avatar you'd like me to generate for you. For example, you could say 'generate an avatar of a professional businesswoman with short brown hair' or 'create an avatar that looks like a friendly teacher with glasses'.",
+        action: "prompt_for_avatar_description",
+        timestamp: Date.now()
+      });
+      
+      console.log('✅ Sent prompt request to agent');
+    } catch (error) {
+      console.error('❌ Failed to send prompt request to agent:', error);
+    }
+  }, [publishData]);
 
   const handleGenerateAvatar = useCallback(async (userPrompt: string = "") => {
     console.log('🎥Frontend Button Clicked: generateAvatar called');
@@ -1279,11 +1297,11 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
           {!isStreaming && !capturedPhoto && (!avatarExists || showPhotoCaptureButton) && (
             <div className="flex gap-4">
               <Button key="start" onClick={handleStartCamera}>
-                "Clone my face"
+                "Take my photo"
               </Button>
 
-              <Button key="generate" onClick={() => handleGenerateAvatar()}>
-                "Make a new avatar"
+              <Button key="generate" onClick={() => handleDescribeImageRequest()}>
+                "Describe an image"
               </Button>
 
             </div>
@@ -1292,7 +1310,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
 
           {isStreaming && (
             <Button key="capture" onClick={handleCapturePhoto}>
-              "Take Photo"
+              "Capture photo"
             </Button>
           )}
 

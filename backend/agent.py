@@ -71,7 +71,7 @@ load_dotenv(".env.local")
 class Config:
     # Voices
     alexa_voice_id: str = os.getenv("ALEXA_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-    avatar_voice_id: str = os.getenv("AVATAR_VOICE_ID", "UtaLMHFQy5D4jbOLM0tN")
+    avatar_voice_id: str = os.getenv("AVATAR_VOICE_ID", "SAz9YHcvj6GT2YYXdXww")
 
     # Hedra avatar
     default_avatar_id: str = os.getenv(
@@ -115,14 +115,15 @@ class Config:
 # ---------------------------
 class Msg:
     ALEXA_GREETING = (
-        "Hey there! Let's create an avatar...your very own digital clone! In a few sentences, tell me a bit about yourself. When you're done, just tap or say 'clone my face' or describe an avatar you'd like to generate."
+        "Hey there! Let's create an avatar...your very own digital clone! In a few sentences, tell me a bit about yourself."
     )
 
     ALEXA_INSTRUCTIONS = (
         "You are Alexa, Amazon's voice assistant. Do not announce yourself as Alexa. Help the user create a personalized avatar by guiding them through photo capture.\n"
-        "- Guide the user through taking a photo (clone my face → take photo)\n"
+        "- First ask the user to tell you a bit about themselves.\n"
+        "- Guide the user through taking a photo ('take my photo' → 'capture photo')\n"
         "- Be encouraging and natural\n"
-        "Start by greeting them and explaining the process. Ask them to say 'clone my face' or 'make a new avatar' when ready."
+        "Start by greeting them and explaining the process. Ask them to say 'take my photo' or 'describe an image' when ready."
     )
 
     AVATAR_INSTRUCTIONS = (
@@ -167,13 +168,17 @@ async def _get_first_remote_participant(room: rtc.Room) -> Optional[str]:
     return None
 
 
-async def _rpc_frontend(room: rtc.Room, participant_id: str, method: str, payload: str = "", timeout: float = 10.0) -> None:
-    await room.local_participant.perform_rpc(
-        destination_identity=participant_id,
-        method=method,
-        payload=payload,
-        response_timeout=timeout,
-    )
+async def _rpc_frontend(room: rtc.Room, participant_id: str, method: str, payload: str = "", timeout: float = 30.0) -> None:
+    try:
+        await room.local_participant.perform_rpc(
+            destination_identity=participant_id,
+            method=method,
+            payload=payload,
+            response_timeout=timeout,
+        )
+    except Exception as e:
+        print(f"⚠️ RPC call failed for method '{method}': {e}")
+        # Don't re-raise to prevent blocking the agent
 
 
 # ---------------------------
@@ -428,7 +433,7 @@ class Assistant(Agent):
     # ---- Function Tools ----
     @function_tool()
     async def generate_avatar(self, context: RunContext, prompt: str = "") -> str:
-        """Generate an avatar for the user with an optional custom prompt (triggered when user says 'make a new avatar" or when the user requests avatar generation with a custom description). 
+        """Generate an avatar for the user with an optional custom prompt (triggered when user says 'make a new avatar" or 'describe an image' or when the user requests avatar generation with a custom description). Tell the user their avatar will be available soon.
         
         Args:
             prompt (str, optional): Custom prompt for avatar generation. Defaults to "".
@@ -471,24 +476,24 @@ class Assistant(Agent):
 
     @function_tool()
     async def start_camera(self, context: RunContext) -> str:
-        """Activate the user's camera for photo capture (triggered by 'clone my face' or something similar)."""
+        """Activate the user's camera for photo capture (triggered by 'take photo' or 'take my photo' or 'take a photo' or something similar)."""
         try:
             # Check if camera is already started
             if self.orchestrator.camera_started:
-                return "I can see your camera is already active! You look great. Say 'take photo' when you're ready to capture."
+                return "I can see your camera is already active! You look great. Say 'capture photo' when you're ready to capture."
             
             pid = await _get_first_remote_participant(self.room)
             if not pid:
                 return "I don't see you connected yet."
             await _rpc_frontend(self.room, pid, method="startCamera")
             self.orchestrator.camera_started = True
-            return "Great! Say 'take photo' whenever you're ready to capture."
+            return "Great! Say 'capture photo' whenever you're ready to capture."
         except Exception as e:
             return f"I couldn't start the camera: {e}"
 
     @function_tool()
     async def take_photo(self, context: RunContext) -> str:
-        """Capture a photo for the user's avatar (triggered by 'take photo')."""
+        """Capture a photo for the user's avatar (triggered by 'capture photo')."""
         try:
             # Check if camera is started first - be more permissive and check multiple sources
             camera_ready = (
@@ -497,7 +502,8 @@ class Assistant(Agent):
             )
             
             if not camera_ready:
-                return "Let's start your camera first! Please tap or say 'clone my face'."
+                await self.start_camera(context)
+                return "Let's start your camera first! Then say 'capture photo'."
             
             pid = await _get_first_remote_participant(self.room)
             if not pid:
@@ -591,6 +597,7 @@ class Orchestrator:
         self.voice_cloning_enabled = False  # store voice cloning preference
         self.agent: Optional[Assistant] = None
         self.room_service: Optional[api.RoomService] = None
+        self._has_greeted = False  # prevent duplicate greetings
 
     # ---- Session setup ----
     async def start(self) -> None:
@@ -604,8 +611,11 @@ class Orchestrator:
             stt=deepgram.STT(model=self.cfg.deepgram_model, language="multi"),
             llm=llm,
             tts=elevenlabs.TTS(voice_id=self.cfg.alexa_voice_id, model=self.cfg.eleven_tts_model),
-            vad=silero.VAD.load(),
-            turn_detection="stt",
+            vad=silero.VAD.load(
+                # More lenient VAD settings to prevent cutting off user speech
+                min_silence_duration=1.5,  # Wait 1.5s of silence before ending speech (was ~0.5s default)
+                min_speech_duration=0.1,  # Minimum speech duration to trigger (100ms)
+            ),
         )
 
         # Voice cloner bound to the room
@@ -722,9 +732,16 @@ class Orchestrator:
                     print(f"🎤 Received agent message via room data: {pkt.data.decode('utf-8')}")
                     message = json.loads(pkt.data.decode("utf-8"))
                     agent_message = message.get("message")
+                    action = message.get("action")
+                    
                     if agent_message and self.session:
                         print(f"🗣️ Agent speaking immediate message: {agent_message}")
                         asyncio.create_task(self._speak_agent_message(agent_message))
+                        
+                        # If this is a prompt for avatar description, update agent instructions
+                        if action == "prompt_for_avatar_description" and self.agent:
+                            print("🎨 Setting agent to listen for avatar description")
+                            asyncio.create_task(self._prepare_for_avatar_description())
                 elif pkt.topic == "filter_selection":
                     message = json.loads(pkt.data.decode("utf-8"))
                     filter_id = message.get("filterID")
@@ -824,7 +841,7 @@ class Orchestrator:
             
             # Debug: Print TTS info after successful avatar start
             print(f"🔍 TTS Debug - session._tts: {self.session._tts}")
-            speech_handle = self.session.say(f"I've applied the filter!")
+            # speech_handle = self.session.say(f"I've applied the filter!")
             print(f"🔍 session.say() returned speech_handle: {speech_handle}")
             
             print(f"🔍 About to await speech_handle...")
@@ -905,8 +922,19 @@ class Orchestrator:
     # ---- Greetings ----
     async def _alexa_greeting(self) -> None:
         try:
+            # Prevent duplicate greetings that cause interruptions
+            if self._has_greeted:
+                print("🔇 Skipping duplicate greeting")
+                return
+            
+            self._has_greeted = True
             await asyncio.sleep(1)
             await self.session.say(Msg.ALEXA_GREETING)
+            print("👋 Initial greeting completed")
+            
+            # Add extra delay after greeting to let VAD settle before listening
+            await asyncio.sleep(2)
+            print("🎤 Ready to listen properly")
         except Exception as e:
             print(f"⚠️ greeting failed: {e}")
 
@@ -985,6 +1013,26 @@ class Orchestrator:
                 )
         except Exception as e:
             print(f"❌ switch_mode error: {e}")
+
+    async def _prepare_for_avatar_description(self) -> None:
+        """Prepare the agent to listen for avatar description and trigger generate_avatar tool call"""
+        if not self.agent:
+            return
+        
+        # Update agent instructions to be ready for avatar description
+        enhanced_instructions = (
+            "You are Alexa, Amazon's voice assistant. The user has just clicked 'Describe an image' and you've prompted them for an avatar description. "
+            "Listen carefully for their response describing what kind of avatar they want. "
+            "When they provide a description (like 'professional businesswoman with short brown hair' or 'friendly teacher with glasses'), "
+            "immediately call the generate_avatar function with their description as the prompt parameter. "
+            "Be encouraging and let them know you're creating their custom avatar."
+        )
+        
+        try:
+            await self.agent.update_instructions(enhanced_instructions)
+            print("🎨 Updated agent instructions to listen for avatar description")
+        except Exception as e:
+            print(f"⚠️ Failed to update agent instructions: {e}")
 
     def _get_avatar_id_from_polling_state(self) -> Optional[str]:
         """Get avatar ID from the polling state (set by frontend via /api/set-avatar-id)"""
@@ -1085,7 +1133,7 @@ async def show_photo_capture_ui(ctx: JobContext) -> str:
             payload=b'{"action": "show_photo_capture"}',
             topic="frontend_control",
         )
-        return "Photo capture interface is ready. Say 'clone my face' when you're set."
+        return "Photo capture interface is ready. Say 'capture photo' when you're set."
     except Exception as e:
         return f"Failed to show photo UI: {e}"
 

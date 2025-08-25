@@ -27,7 +27,7 @@ export default function TranscriptionView() {
                 ease: [0.09, 1.04, 0.245, 1.055],
                 scale: { duration: 0.3 }
               }}
-              className="p-2 self-start fit-content"
+              className="p-2 self-start fit-content text-xl"
             >
               {mostRecentAssistantMessage.text}
             </motion.div>
