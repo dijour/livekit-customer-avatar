@@ -619,12 +619,12 @@ function TopNavPersonalitySelector() {
 
   // Personality carousel data
   const personalities = [
-    { name: "Core", subtitle: "The Alexa you know and love.", media: "/videos/heart.mp4" }, //heart
-    { name: "Minimalist", subtitle: "Adequate. Your primary question or topic for today's discussion?", media: "/videos/check.mp4" }, //checkmark
-    { name: "Supporter", subtitle: "Living my best life cheering on amazing people like YOU! Keep shining.", media: "/videos/flower.mp4" }, //actual flowers
-    { name: "Free Spirit", subtitle: "All good vibes here, dude. Taking it easy as usual.", media: "/videos/clouds.mp4" }, //clouds
-    { name: "Dreamer", subtitle: "My spirit is doing cartwheels through the universe.", media: "/videos/star.mp4" }, //star
-    { name: "Rockstar", subtitle: "Living so legendarily right now that even my haters are taking notes.", media: "/videos/fireworks.mp4" }, //flowers?
+    { name: "Core", subtitle: "The Alexa you know and love.", media: "/images/heart.gif" }, //heart
+    { name: "Minimalist", subtitle: "Adequate. Your primary question or topic for today's discussion?", media: "/images/check.gif" }, //checkmark
+    { name: "Supporter", subtitle: "Living my best life cheering on amazing people like YOU! Keep shining.", media: "/images/flower.gif" }, //actual flowers
+    { name: "Free Spirit", subtitle: "All good vibes here, dude. Taking it easy as usual.", media: "/images/clouds.gif" }, //clouds
+    { name: "Dreamer", subtitle: "My spirit is doing cartwheels through the universe.", media: "/images/star.gif" }, //star
+    { name: "Rockstar", subtitle: "Living so legendarily right now that even my haters are taking notes.", media: "/images/fireworks.gif" }, //flowers?
 
   ];
   const handlePersonalitySelection = useCallback(async () => {
