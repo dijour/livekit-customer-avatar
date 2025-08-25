@@ -116,14 +116,14 @@ class Config:
 class Msg:
     ALEXA_GREETING = (
         "Hey! I'm here to help you create your personalized avatar. "
-        "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, say 'start camera'."
+        "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, tell me 'use a photo' or 'make a new avatar'."
     )
 
     ALEXA_INSTRUCTIONS = (
         "You are Alexa, Amazon's voice assistant. Do not announce yourself as Alexa. Help the user create a personalized avatar by guiding them through photo capture.\n"
-        "- Guide the user through taking a photo (start camera → take photo)\n"
+        "- Guide the user through taking a photo (use photo → take photo)\n"
         "- Be encouraging and natural\n"
-        "Start by greeting them and explaining the process. Ask them to say 'start camera' when ready."
+        "Start by greeting them and explaining the process. Ask them to say 'use a photo' or 'make a new avatar' when ready."
     )
 
     AVATAR_INSTRUCTIONS = (
@@ -428,13 +428,28 @@ class Assistant(Agent):
 
     # ---- Function Tools ----
     @function_tool()
-    async def generate_avatar(self, context: RunContext) -> str:
-        """Generate an avatar for the user (triggered by 'generate avatar')."""
-        return "I'm generating your avatar now. This might take a moment..."
+    async def generate_avatar(self, context: RunContext, prompt: str = "") -> str:
+        """Generate an avatar for the user with an optional custom prompt (triggered when user says 'make a new avatar" or requests avatar generation with a custom description). 
+        
+        Args:
+            prompt (str, optional): Custom prompt for avatar generation. Defaults to "".
+        """
+        try:
+            pid = await _get_first_remote_participant(self.room)
+            if not pid:
+                return "I don't see you connected yet."
+            
+            # Call the frontend generateAvatar RPC method with the prompt
+            await _rpc_frontend(self.room, pid, method="generateAvatar", payload=f'{{"prompt": "{prompt}"}}')
+            prompt_message = f" with your custom request: '{prompt}'" if prompt else ""
+            return f"Perfect! I'm generating your avatar now{prompt_message}. This might take a moment..."
+            
+        except Exception as e:
+            return f"I couldn't generate the avatar: {e}"
 
     @function_tool()
     async def start_camera(self, context: RunContext) -> str:
-        """Activate the user's camera for photo capture (triggered by 'start camera' or something similar)."""
+        """Activate the user's camera for photo capture (triggered by 'use a photo' or something similar)."""
         try:
             # Check if camera is already started
             if self.orchestrator.camera_started:
@@ -442,7 +457,7 @@ class Assistant(Agent):
             
             pid = await _get_first_remote_participant(self.room)
             if not pid:
-                return "I don't see you connected yet. Once you're in the room, say 'start camera' again."
+                return "I don't see you connected yet."
             await _rpc_frontend(self.room, pid, method="startCamera")
             self.orchestrator.camera_started = True
             return "Great! Say 'take photo' whenever you're ready to capture."
@@ -460,7 +475,7 @@ class Assistant(Agent):
             )
             
             if not camera_ready:
-                return "Let's start your camera first! Please say 'start camera' or click the Start Camera button."
+                return "Let's start your camera first! Please ask me to 'use a photo' or click the use a photo button."
             
             pid = await _get_first_remote_participant(self.room)
             if not pid:
@@ -1048,7 +1063,7 @@ async def show_photo_capture_ui(ctx: JobContext) -> str:
             payload=b'{"action": "show_photo_capture"}',
             topic="frontend_control",
         )
-        return "Photo capture interface is ready. Say 'start camera' when you're set."
+        return "Photo capture interface is ready. Say 'use a photo' when you're set."
     except Exception as e:
         return f"Failed to show photo UI: {e}"
 

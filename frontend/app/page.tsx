@@ -140,7 +140,23 @@ export default function Page() {
         // Check if camera is available and ready
         const isActive = photoCaptureRef.current?.startCamera !== undefined;
         console.log('📷 Camera active status:', isActive);
-        return isActive ? "true" : "false";
+        return JSON.stringify(isActive ? "true" : "false");
+      });
+
+      room.registerRpcMethod('generateAvatar', async (data) => {
+        console.log('🎨 RPC: generateAvatar called');
+        const requestData = JSON.parse(data.payload);
+        const userPrompt = requestData.prompt || "";
+        
+        // Trigger avatar generation via custom event (same pattern as other actions)
+        const generateEvent = new CustomEvent('generateAvatarRequest', { 
+          detail: { prompt: userPrompt } 
+        });
+        window.dispatchEvent(generateEvent);
+        
+        // Show Alexa transition during avatar generation
+        setShowAlexaTransition(true);
+        return JSON.stringify("Avatar generation started");
       });
 
     } catch (error) {
@@ -207,6 +223,17 @@ export default function Page() {
             case "skip_photo":
               // Skip photo capture
               avatarSetup.handleSkipPhoto();
+              break;
+
+            case "generate_avatar":
+              // Trigger avatar generation with the provided prompt
+              console.log("🎨 Triggering avatar generation with prompt:", message.prompt);
+              // We need to access handleGenerateAvatar from PhotoCaptureControls
+              // For now, dispatch a custom event that PhotoCaptureControls can listen to
+              const generateEvent = new CustomEvent('generateAvatarRequest', { 
+                detail: { prompt: message.prompt || "" } 
+              });
+              window.dispatchEvent(generateEvent);
               break;
           }
         } catch (error) {
@@ -511,10 +538,12 @@ function SimpleVoiceAssistant(props: {
                 </div>
               )}
 
-              {/* Right column - Photo capture controls */}
-              <div className="flex-shrink-0">
-                <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} onShowAlexaTransition={props.onShowAlexaTransition} />
-              </div>
+              {/* Right column - Photo capture controls (only show when no avatar exists) */}
+              {!props.avatarExists && (
+                <div className="flex-shrink-0">
+                  <PhotoCaptureControls photoCaptureRef={props.photoCaptureRef} showPhotoCaptureButton={props.showPhotoCaptureButton} avatarExists={!!props.avatarExists} onShowAlexaTransition={props.onShowAlexaTransition} avatarSetup={props.avatarSetup} />
+                </div>
+              )}
             </div>
 
             <RoomAudioRenderer />
@@ -1023,7 +1052,7 @@ function AvatarVisualControls() {
   );
 }
 
-function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists, onShowAlexaTransition }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean; onShowAlexaTransition: () => void }) {
+function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarExists, onShowAlexaTransition, avatarSetup }: { photoCaptureRef: React.RefObject<PhotoCaptureRef | null>; showPhotoCaptureButton: boolean; avatarExists: boolean; onShowAlexaTransition: () => void; avatarSetup: any }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState(false);
   const [currentStep, setCurrentStep] = useState<'capture' | 'enhance' | 'confirm'>('capture');
@@ -1032,7 +1061,65 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
   // Feature flag: enable full workflow only if URL contains #modify
   const isModifyMode = typeof window !== 'undefined' && window.location.hash.includes('modify');
 
-  // Listen for state changes from PhotoCapture component
+  const handleGenerateAvatar = useCallback(async (userPrompt: string = "") => {
+    console.log('🎥Frontend Button Clicked: generateAvatar called');
+
+    try {
+      // Step 1: Generate an image using OpenAI (similar to enhance-image API)
+      console.log('🎨 Generating avatar image with OpenAI...');
+      
+      const formData = new FormData();
+      // Create a base prompt and append user prompt if provided
+      const basePrompt = "Create a professional headshot portrait of a person for use as an avatar. The person should have a friendly, approachable expression, good lighting, and be suitable for professional use.";
+      if (userPrompt.length > 0) {
+        userPrompt = "USER PROMPT: " + userPrompt;
+      }
+      const fullPrompt = userPrompt ? `${basePrompt} ${userPrompt}` : basePrompt;
+      formData.append("prompt", fullPrompt);
+      
+      const generateResponse = await fetch("/api/generate-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!generateResponse.ok) {
+        throw new Error(`Image generation failed: ${generateResponse.status}`);
+      }
+
+      const generateResult = await generateResponse.json();
+      
+      if (!generateResult.success || !generateResult.generatedImage) {
+        throw new Error("No generated image received from OpenAI");
+      }
+
+      console.log('✅ Image generated successfully');
+
+      // Step 2: Convert base64 image to Blob for avatar creation
+      const base64Data = generateResult.generatedImage;
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const imageBlob = new Blob([bytes], { type: 'image/jpeg' });
+
+      // Step 3: Use avatarSetup.handlePhotoCapture to properly handle the generated image
+      // This will trigger the same flow as photo capture: create avatar, update state, and switch modes
+      console.log('🎭 Processing generated image through avatar setup...');
+      await avatarSetup.handlePhotoCapture(imageBlob);
+
+      // Show Alexa transition during avatar generation (same as photo capture)
+      onShowAlexaTransition();
+
+      console.log('🎉 Avatar generation and setup completed successfully!');
+
+    } catch (error) {
+      console.error('❌ Avatar generation failed:', error);
+      // You might want to show an error notification to the user here
+    }
+  }, [avatarSetup, onShowAlexaTransition]);
+
+  // Listen for state changes from PhotoCapture component and RPC requests
   useEffect(() => {
     const handleStateChange = (event: CustomEvent) => {
       const state = event.detail;
@@ -1041,12 +1128,21 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       setCurrentStep(state.currentStep);
     };
 
+    const handleGenerateAvatarRequest = (event: CustomEvent) => {
+      const { prompt } = event.detail;
+      console.log('🎨 PhotoCaptureControls received generateAvatarRequest:', prompt);
+      handleGenerateAvatar(prompt);
+    };
+
     window.addEventListener('photoCaptureStateChange', handleStateChange as EventListener);
+    window.addEventListener('generateAvatarRequest', handleGenerateAvatarRequest as EventListener);
+    
     return () => {
       window.removeEventListener('photoCaptureStateChange', handleStateChange as EventListener);
+      window.removeEventListener('generateAvatarRequest', handleGenerateAvatarRequest as EventListener);
     };
-  }, []);
-
+  }, [handleGenerateAvatar]);
+  
   const handleStartCamera = useCallback(async () => {
     console.log('🎥 Frontend Button Clicked: startCamera called');
     console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
@@ -1113,14 +1209,22 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       <div className="flex gap-2 flex-wrap justify-center">
         <AnimatePresence mode="wait">
           {!isStreaming && !capturedPhoto && (!avatarExists || showPhotoCaptureButton) && (
+            <div className="flex gap-4">
             <Button key="start" onClick={handleStartCamera}>
-              Start Camera
+              "Use a photo"
             </Button>
+
+             <Button key="generate" onClick={() => handleGenerateAvatar()}>
+              "Make a new avatar"
+            </Button>
+              
+            </div>
           )}
+          
 
           {isStreaming && (
             <Button key="capture" onClick={handleCapturePhoto}>
-              Take Photo
+              "Take Photo"
             </Button>
           )}
 
