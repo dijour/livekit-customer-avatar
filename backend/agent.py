@@ -115,15 +115,14 @@ class Config:
 # ---------------------------
 class Msg:
     ALEXA_GREETING = (
-        "Hey! I'm here to help you create your personalized avatar. "
-        "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, tell me 'use a photo' or describe your avatar."
+        "Hey there! Let's create an avatar...your very own digital clone! In a few sentences, tell me a bit about yourself. When you're done, just tap or say 'clone my face' or describe an avatar you'd like to generate."
     )
 
     ALEXA_INSTRUCTIONS = (
         "You are Alexa, Amazon's voice assistant. Do not announce yourself as Alexa. Help the user create a personalized avatar by guiding them through photo capture.\n"
-        "- Guide the user through taking a photo (use photo → take photo)\n"
+        "- Guide the user through taking a photo (clone my face → take photo)\n"
         "- Be encouraging and natural\n"
-        "Start by greeting them and explaining the process. Ask them to say 'use a photo' or 'make a new avatar' when ready."
+        "Start by greeting them and explaining the process. Ask them to say 'clone my face' or 'make a new avatar' when ready."
     )
 
     AVATAR_INSTRUCTIONS = (
@@ -472,7 +471,7 @@ class Assistant(Agent):
 
     @function_tool()
     async def start_camera(self, context: RunContext) -> str:
-        """Activate the user's camera for photo capture (triggered by 'use a photo' or something similar)."""
+        """Activate the user's camera for photo capture (triggered by 'clone my face' or something similar)."""
         try:
             # Check if camera is already started
             if self.orchestrator.camera_started:
@@ -498,7 +497,7 @@ class Assistant(Agent):
             )
             
             if not camera_ready:
-                return "Let's start your camera first! Please ask me to 'use a photo' or click the use a photo button."
+                return "Let's start your camera first! Please tap or say 'clone my face'."
             
             pid = await _get_first_remote_participant(self.room)
             if not pid:
@@ -1086,7 +1085,7 @@ async def show_photo_capture_ui(ctx: JobContext) -> str:
             payload=b'{"action": "show_photo_capture"}',
             topic="frontend_control",
         )
-        return "Photo capture interface is ready. Say 'use a photo' when you're set."
+        return "Photo capture interface is ready. Say 'clone my face' when you're set."
     except Exception as e:
         return f"Failed to show photo UI: {e}"
 

@@ -1129,9 +1129,9 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
 
       const formData = new FormData();
       // Create a base prompt and append user prompt if provided
-      const basePrompt = "Create a professional headshot portrait of a person for use as an avatar. The person should have a friendly, approachable expression, good lighting, and be suitable for professional use.";
+      const basePrompt = "You are an avatar generator. A user has just requested to create a new avatar with a custom description. Your only constraints are that you must generate something with two eyes, a mouth, and a nose. The avatar should have a friendly, approachable expression, good lighting, and be suitable for professional use.";
       if (userPrompt.length > 0) {
-        userPrompt = "USER PROMPT: " + userPrompt;
+        userPrompt = "USER AVATAR REQUEST: " + userPrompt;
       }
       const fullPrompt = userPrompt ? `${basePrompt} ${userPrompt}` : basePrompt;
       formData.append("prompt", fullPrompt);
@@ -1279,7 +1279,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
           {!isStreaming && !capturedPhoto && (!avatarExists || showPhotoCaptureButton) && (
             <div className="flex gap-4">
               <Button key="start" onClick={handleStartCamera}>
-                "Use a photo"
+                "Clone my face"
               </Button>
 
               <Button key="generate" onClick={() => handleGenerateAvatar()}>
