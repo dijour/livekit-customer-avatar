@@ -6,7 +6,7 @@ interface PopoverProps {
   onClose: () => void;
   children: ReactNode;
   triggerRef: React.RefObject<HTMLElement>;
-  align?: 'center' | 'right';
+  align?: 'center' | 'right' | 'bottom';
   width?: number;
 }
 
@@ -15,24 +15,49 @@ export function Popover({ isOpen, onClose, children, triggerRef, align = 'center
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
-    if (isOpen && triggerRef.current && popoverRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const popoverRect = popoverRef.current.getBoundingClientRect();
-      const popoverWidth = width;
+    if (isOpen && triggerRef.current) {
+      // Small delay to ensure DOM is updated
+      const calculatePosition = () => {
+        if (!triggerRef.current || !popoverRef.current) return;
+        
+        const rect = triggerRef.current.getBoundingClientRect();
+        const popoverRect = popoverRef.current.getBoundingClientRect();
+        const popoverWidth = width;
+        
+        let left = 0;
+        let top = 0;
+        
+        if (align === 'center') {
+          left = rect.left + (rect.width / 2) - (popoverWidth / 2);
+          top = rect.top - popoverRect.height - 36; // popover height + 36px gap above button
+        } else if (align === 'right') {
+          left = rect.right - popoverWidth;
+          top = rect.top - popoverRect.height - 36; // popover height + 36px gap above button
+        } else if (align === 'bottom') {
+          const centerX = rect.left + (rect.width / 2);
+          left = centerX - (popoverWidth / 2);
+          top = rect.bottom + 12; // 12px gap below button
+          
+          // Ensure popover stays within viewport bounds with more conservative margins
+          const viewportWidth = window.innerWidth;
+          const minLeft = 32; // 32px margin from left edge
+          const maxLeft = viewportWidth - popoverWidth - 32; // 32px margin from right edge
+          
+          // Clamp the position to stay within bounds
+          if (left < minLeft) {
+            left = minLeft;
+          } else if (left > maxLeft) {
+            left = maxLeft;
+          }
+        }
+        
+        setPosition({ top, left });
+      };
       
-      let left = 0;
-      if (align === 'center') {
-        left = rect.left + (rect.width / 2) - (popoverWidth / 2);
-      } else if (align === 'right') {
-        left = rect.right - popoverWidth;
-      }
-      
-      setPosition({
-        top: rect.top - popoverRect.height - 36, // popover height + 48px gap above button
-        left: left
-      });
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(calculatePosition);
     }
-  }, [isOpen, align, triggerRef]);
+  }, [isOpen, align, triggerRef, width]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -148,18 +148,33 @@ export default function Page() {
         console.log('🎨 RPC: generateAvatar called');
         const requestData = JSON.parse(data.payload);
         const userPrompt = requestData.prompt || "";
-        
+
         // Trigger avatar generation via custom event (same pattern as other actions)
-        const generateEvent = new CustomEvent('generateAvatarRequest', { 
-          detail: { prompt: userPrompt } 
+        const generateEvent = new CustomEvent('generateAvatarRequest', {
+          detail: { prompt: userPrompt }
         });
         window.dispatchEvent(generateEvent);
-        
+
         // Show Alexa transition during avatar generation
         setShowAlexaTransition(true);
         return JSON.stringify("Avatar generation started");
       });
 
+      room.registerRpcMethod('modifyAvatar', async (data) => {
+        console.log('🎨 RPC: modifyAvatar called');
+        const requestData = JSON.parse(data.payload);
+        const userPrompt = requestData.prompt || "";
+
+        // Trigger filter selection via custom event
+        const filterEvent = new CustomEvent('filterRequest', {
+          detail: { filterName: userPrompt }
+        });
+        window.dispatchEvent(filterEvent);
+
+        // Show Alexa transition during avatar modification
+        setShowAlexaTransition(true);
+        return JSON.stringify("Avatar modification started");
+      });
     } catch (error) {
       console.error("Failed to connect:", error);
       setIsAutoConnecting(false);
@@ -231,8 +246,8 @@ export default function Page() {
               console.log("🎨 Triggering avatar generation with prompt:", message.prompt);
               // We need to access handleGenerateAvatar from PhotoCaptureControls
               // For now, dispatch a custom event that PhotoCaptureControls can listen to
-              const generateEvent = new CustomEvent('generateAvatarRequest', { 
-                detail: { prompt: message.prompt || "" } 
+              const generateEvent = new CustomEvent('generateAvatarRequest', {
+                detail: { prompt: message.prompt || "" }
               });
               window.dispatchEvent(generateEvent);
               break;
@@ -341,7 +356,7 @@ export default function Page() {
   // Show start experience button if user hasn't interacted yet
   if (!hasUserInteracted) {
     return (
-      <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif'}} className="h-screen flex flex-col items-center justify-center">
+      <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif' }} className="h-screen flex flex-col items-center justify-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -434,39 +449,39 @@ function SimpleVoiceAssistant(props: {
     setShowCaptions(!showCaptions);
   }, [showCaptions]);
 
-    // Log agent state changes
-    useEffect(() => {
-      console.log('🤖 Agent State Changed:', agentState);
-      console.log('🤖 Agent State Details:', {
-        state: agentState,
-        timestamp: new Date().toISOString(),
-        avatarExists: props.avatarExists,
-        isAutoConnecting: props.isAutoConnecting
-      });
-    }, [agentState, props.avatarExists, props.isAutoConnecting]);
+  // Log agent state changes
+  useEffect(() => {
+    console.log('🤖 Agent State Changed:', agentState);
+    console.log('🤖 Agent State Details:', {
+      state: agentState,
+      timestamp: new Date().toISOString(),
+      avatarExists: props.avatarExists,
+      isAutoConnecting: props.isAutoConnecting
+    });
+  }, [agentState, props.avatarExists, props.isAutoConnecting]);
 
-    // Log when avatarExists becomes true
-    useEffect(() => {
-      if (props.avatarExists) {
-        console.log('🤖 Avatar exists is now true - avatar is ready!');
-      }
-    }, [props.avatarExists]);
+  // Log when avatarExists becomes true
+  useEffect(() => {
+    if (props.avatarExists) {
+      console.log('🤖 Avatar exists is now true - avatar is ready!');
+    }
+  }, [props.avatarExists]);
   return (
     <div className="h-screen flex flex-col relative">
-      
+
       {/* Main content area with AgentVisualizer in normal document flow */}
       <div className="flex-1 flex items-center justify-center">
-        
-        
+
+
 
         {agentState !== "disconnected" && videoTrack && (
           <div className="pointer-events-none" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <AgentVisualizer avatarExists={props.avatarExists}/>
+            <AgentVisualizer avatarExists={props.avatarExists} />
           </div>
         )}
 
       </div>
-      
+
       {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
       <AnimatePresence mode="wait">
         {(!props.avatarSetup.state.assetId || props.avatarSetup.showPhotoCapture) && (
@@ -507,13 +522,20 @@ function SimpleVoiceAssistant(props: {
                   </button>
                 </div>
 
-                {/* Center status text - horizontally centered, vertically aligned with buttons */}
-                {/* <div className="absolute left-1/2 top-[36px] -translate-x-1/2 h-[72px] flex items-center text-white text-[24px] whitespace-nowrap">
-                  <PhotoCaptureStatus />
-                </div> */}
+                {/* Center personality selector - horizontally centered, vertically aligned with buttons */}
+                {/* {props.avatarExists && (
+                  <div className="absolute left-1/2 top-[36px] -translate-x-1/2">
+                    <TopNavPersonalitySelector />
+                  </div>
+                )} */}
 
                 {/* Right buttons */}
                 <div className="absolute right-[48px] top-[36px] flex gap-4">
+                  {props.avatarExists && (
+                    
+                      <TopNavPersonalitySelector />
+                    
+                  )}
                   <button
                     onClick={toggleCaptions}
                     className="w-[72px] h-[72px] bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
@@ -573,10 +595,10 @@ function SimpleVoiceAssistant(props: {
 
 function AgentVisualizer(props: { avatarExists: boolean }) {
   const { videoTrack } = useVoiceAssistant();
-  
+
   // Show video track when available
   if (!videoTrack) return null;
-  
+
   return (
     <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
       <MaskedMediaView>
@@ -587,18 +609,12 @@ function AgentVisualizer(props: { avatarExists: boolean }) {
 }
 
 
-function AvatarVisualControls() {
+function TopNavPersonalitySelector() {
   const [personalityEnabled, setPersonalityEnabled] = useState(false);
-  const [filtersEnabled, setFiltersEnabled] = useState(false);
   const [currentPersonalityIndex, setCurrentPersonalityIndex] = useState(0);
   const [selectedPersonalityIndex, setSelectedPersonalityIndex] = useState(0); // Core personality is selected by default
   const [hasInteractedWithCarousel, setHasInteractedWithCarousel] = useState(false);
-  const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
-  const [filterCooldownRemaining, setFilterCooldownRemaining] = useState(30); // Start with 30 second cooldown
-  const [isFilterCooldownActive, setIsFilterCooldownActive] = useState(true); // Start locked when avatar first appears
   const personalityRef = useRef<HTMLButtonElement>(null);
-  const filtersRef = useRef<HTMLButtonElement>(null);
-  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { publishData } = useRoomData();
 
   // Personality carousel data
@@ -611,6 +627,156 @@ function AvatarVisualControls() {
     { name: "Rockstar", subtitle: "Living so legendarily right now that even my haters are taking notes.", media: "/videos/fireworks.mp4" }, //flowers?
 
   ];
+  const handlePersonalitySelection = useCallback(async () => {
+    const selectedPersonality = personalities[currentPersonalityIndex];
+    console.log('🎭 Personality selected:', selectedPersonality.name);
+
+    // Send personality selection to backend via LiveKit data channel
+    try {
+      await publishData('personality_selection', {
+        personalityName: selectedPersonality.name,
+        personalityIndex: currentPersonalityIndex
+      });
+      console.log('📡 Personality data sent to backend');
+    } catch (error) {
+      console.error('Failed to send personality data:', error);
+    }
+
+    // Update selected personality and close the popover
+    setSelectedPersonalityIndex(currentPersonalityIndex);
+    setPersonalityEnabled(false);
+    setHasInteractedWithCarousel(false);
+  }, [currentPersonalityIndex, personalities, publishData]);
+
+  const handlePersonalityToggle = useCallback((toggled: boolean) => {
+    console.log('🔄 handlePersonalityToggle called:', { toggled });
+    setPersonalityEnabled(toggled);
+    console.log('Personality:', toggled ? 'enabled' : 'disabled');
+
+    // Reset carousel interaction state when closing
+    if (!toggled) {
+      setHasInteractedWithCarousel(false);
+    }
+  }, []);
+
+  const closePersonalityPopover = useCallback(() => {
+    setPersonalityEnabled(false);
+    setHasInteractedWithCarousel(false);
+  }, []);
+
+  // Carousel navigation functions
+  const goToPreviousPersonality = useCallback(() => {
+    console.log('⬅️ Previous personality clicked');
+    setCurrentPersonalityIndex((prev) =>
+      prev === 0 ? personalities.length - 1 : prev - 1
+    );
+    setHasInteractedWithCarousel(true);
+    console.log('🎯 hasInteractedWithCarousel set to true');
+  }, [personalities.length]);
+
+  const goToNextPersonality = useCallback(() => {
+    console.log('➡️ Next personality clicked');
+    setCurrentPersonalityIndex((prev) =>
+      (prev + 1) % personalities.length
+    );
+    setHasInteractedWithCarousel(true);
+    console.log('🎯 hasInteractedWithCarousel set to true');
+  }, [personalities.length]);
+
+  const currentPersonality = personalities[currentPersonalityIndex];
+
+  return (
+    <div className="relative">
+      <Toggle
+        ref={personalityRef}
+        isToggled={personalityEnabled}
+        onToggle={handlePersonalityToggle}
+        icon={<BrowseIcon size={32} />}
+        className="w-[210px] bg-white/10 hover:bg-white/20 text-white"
+      >
+        Personality
+      </Toggle>
+      <Popover
+        width={436}
+        align="bottom"
+        isOpen={personalityEnabled}
+        onClose={closePersonalityPopover}
+        triggerRef={personalityRef}
+      >
+        <div className="relative w-full h-[420px]">
+          <motion.div
+            key={currentPersonalityIndex}
+            className="relative w-full h-full flex flex-col justify-center items-center"
+          >
+            {/* Background Video */}
+            {currentPersonality.media.endsWith('.mp4') ? (
+              <video
+                className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
+                src={currentPersonality.media}
+                autoPlay
+                loop
+                muted
+              />
+            ) : (
+              <img
+                className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
+                src={currentPersonality.media}
+              />
+            )}
+            <motion.button
+              onClick={goToPreviousPersonality}
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
+              transition={{ duration: 0.1 }}
+            >
+              <ChevronIcon size={48} className="text-white" />
+            </motion.button>
+
+            <motion.button
+              onClick={goToNextPersonality}
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
+              transition={{ duration: 0.1 }}
+            >
+              <ChevronIcon size={48} className="text-white -rotate-180" />
+            </motion.button>
+
+            <motion.div
+              className="absolute bottom-8 left-8 right-8 z-10 flex flex-row justify-between items-end"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <div className="flex flex-col w-full">
+                <div className="text-white text-xl font-bold leading-8">{currentPersonality.name}</div>
+                <div className="text-white/50 text-base font-normal leading-6 ">
+                  {currentPersonality.subtitle}
+                </div>
+              </div>
+
+              {currentPersonalityIndex !== selectedPersonalityIndex && (
+                <Button width="144px" height="60px"
+                  onClick={handlePersonalitySelection}
+                  className="w-[144px] h-[60px] bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-2 rounded-full text-xl font-medium transition-colors"
+                >
+                  Use this
+                </Button>
+              )}
+            </motion.div>
+          </motion.div>
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
+function AvatarVisualControls() {
+  const [filtersEnabled, setFiltersEnabled] = useState(false);
+  const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
+  const [filterCooldownRemaining, setFilterCooldownRemaining] = useState(30); // Start with 30 second cooldown
+  const [isFilterCooldownActive, setIsFilterCooldownActive] = useState(true); // Start locked when avatar first appears
+  const filtersRef = useRef<HTMLButtonElement>(null);
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { publishData } = useRoomData();
+
   const { state } = useAvatarSetup();
   const blob = state.userPhoto; // This is your original photo blob
 
@@ -618,12 +784,12 @@ function AvatarVisualControls() {
   const startFilterCooldown = useCallback(() => {
     setIsFilterCooldownActive(true);
     setFilterCooldownRemaining(30);
-    
+
     // Clear any existing timer
     if (cooldownTimerRef.current) {
       clearInterval(cooldownTimerRef.current);
     }
-    
+
     // Start countdown
     cooldownTimerRef.current = setInterval(() => {
       setFilterCooldownRemaining((prev) => {
@@ -653,39 +819,6 @@ function AvatarVisualControls() {
       }
     };
   }, []);
-  const handlePersonalitySelection = useCallback(async () => {
-    const selectedPersonality = personalities[currentPersonalityIndex];
-    console.log('🎭 Personality selected:', selectedPersonality.name);
-
-    // Send personality selection to backend via LiveKit data channel
-    try {
-      await publishData('personality_selection', {
-        personalityName: selectedPersonality.name,
-        personalityIndex: currentPersonalityIndex
-      });
-      console.log('📡 Personality data sent to backend');
-    } catch (error) {
-      console.error('Failed to send personality data:', error);
-    }
-
-    // Update selected personality and close the popover
-    setSelectedPersonalityIndex(currentPersonalityIndex);
-    setPersonalityEnabled(false);
-    setHasInteractedWithCarousel(false);
-  }, [currentPersonalityIndex, personalities, publishData]);
-
-  const handlePersonalityToggle = useCallback((toggled: boolean) => {
-    console.log('🔄 handlePersonalityToggle called:', { toggled });
-
-    // Only open/close the popover - no personality selection logic
-    setPersonalityEnabled(toggled);
-    console.log('Personality:', toggled ? 'enabled' : 'disabled');
-
-    // Reset carousel interaction state when closing
-    if (!toggled) {
-      setHasInteractedWithCarousel(false);
-    }
-  }, []);
 
   const handleFiltersToggle = useCallback((toggled: boolean) => {
     // Prevent opening if cooldown is active
@@ -699,11 +832,6 @@ function AvatarVisualControls() {
     setFiltersEnabled(toggled);
     console.log('Filters:', toggled ? 'enabled' : 'disabled');
   }, [loadingFilter, isFilterCooldownActive]);
-
-  const closePersonalityPopover = useCallback(() => {
-    setPersonalityEnabled(false);
-    setHasInteractedWithCarousel(false);
-  }, []);
 
   const closeFiltersPopover = useCallback(() => {
     // Prevent closing if a filter is currently loading
@@ -722,12 +850,12 @@ function AvatarVisualControls() {
         "make me pixar style": "Got it, I'm transforming into Pixar style. Please hold!",
         "give me studio lighting": "Got it, I'll apply studio lighting. Please hold!"
       };
-      
+
       // Default message if filter type isn't in our predefined list
       const lowerCaseFilterName = filterName.toLowerCase();
-      const message = filterMessages[lowerCaseFilterName] || 
+      const message = filterMessages[lowerCaseFilterName] ||
         `Got it. I'll have a new appearance very soon. Please hold.`;
-      
+
       await publishData('agent_message', {
         message,
         filterName,
@@ -800,7 +928,7 @@ function AvatarVisualControls() {
               timestamp: Date.now()
             });
             console.log('📡 Filter data sent to backend');
-            
+
             // Start cooldown after successful filter application
             startFilterCooldown();
           } catch (error) {
@@ -811,7 +939,7 @@ function AvatarVisualControls() {
         if (!enhanceResponse.ok) {
           // Handle enhancement errors, especially safety rejections
           console.error('Image enhancement failed:', enhanceResult);
-          
+
           try {
             await publishData('filter_error', {
               errorType: enhanceResult.type || 'Unknown',
@@ -867,121 +995,38 @@ function AvatarVisualControls() {
     setLoadingFilter(null);
   }, [publishData, startFilterCooldown]);
 
-  // Carousel navigation functions
-  const goToPreviousPersonality = useCallback(() => {
-    console.log('⬅️ Previous personality clicked');
-    setCurrentPersonalityIndex((prev) =>
-      prev === 0 ? personalities.length - 1 : prev - 1
-    );
-    setHasInteractedWithCarousel(true);
-    console.log('🎯 hasInteractedWithCarousel set to true');
-  }, [personalities.length]);
+  // Listen for filter requests from RPC
+  useEffect(() => {
+    const handleFilterRequest = (event: CustomEvent) => {
+      const { filterName } = event.detail;
+      console.log('🎨 Filter request received in AvatarVisualControls:', filterName);
+      handleFilterSelection(filterName);
+    };
 
-  const goToNextPersonality = useCallback(() => {
-    console.log('➡️ Next personality clicked');
-    setCurrentPersonalityIndex((prev) =>
-      (prev + 1) % personalities.length
-    );
-    setHasInteractedWithCarousel(true);
-    console.log('🎯 hasInteractedWithCarousel set to true');
-  }, [personalities.length]);
+    window.addEventListener('filterRequest', handleFilterRequest as EventListener);
 
-  const currentPersonality = personalities[currentPersonalityIndex];
+    return () => {
+      window.removeEventListener('filterRequest', handleFilterRequest as EventListener);
+    };
+  }, [handleFilterSelection]);
 
   return (
     <div className="flex gap-4 relative">
-      <div className="relative">
-        <Toggle
-          ref={personalityRef}
-          isToggled={personalityEnabled}
-          onToggle={handlePersonalityToggle}
-          icon={<BrowseIcon size={32} />}
-          className="w-[210px]"
+
+        <Button
+          ref={filtersRef}
+          onClick={() => handleFilterSelection('Add a funny hat')}
         >
-          Personality
-        </Toggle>
-        <Popover
-          width={436}
-          align="center"
-          isOpen={personalityEnabled}
-          onClose={closePersonalityPopover}
-          triggerRef={personalityRef}
+          "Add a funny hat"
+        </Button>
+        <Button
+          ref={filtersRef}
+          onClick={() => handleFilterSelection('Make me a cartoon')}
         >
-          <div className="relative w-full h-[420px]">
-            <motion.div
-              key={currentPersonalityIndex}
-
-              className="relative w-full h-full flex flex-col justify-center items-center"
-            >
-              {/* Background Video */}
-              {currentPersonality.media.endsWith('.mp4') ? (
-                <video
-                  className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
-                  src={currentPersonality.media}
-                  autoPlay
-                  loop
-                  muted
-                />
-              ) : (
-                <img
-                  className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
-                  src={currentPersonality.media}
-                />
-              )}
-              <motion.button
-                onClick={goToPreviousPersonality}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
-
-                transition={{ duration: 0.1 }}
-                style={{ transformOrigin: 'center' }}
-              >
-                <ChevronIcon size={32} />
-              </motion.button>
-
-              <motion.button
-                onClick={goToNextPersonality}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hover:opacity-70 transition-opacity"
-
-                transition={{ duration: 0.1 }}
-                style={{ transformOrigin: 'center' }}
-              >
-                <ChevronIcon size={32} className="rotate-180" />
-              </motion.button>
-              <motion.div
-                className="absolute bottom-0 left-0 right-0 z-10 flex flex-row justify-start gap-4 items-end p-[28px]"
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-              >
-                <div className="flex flex-col w-full">
-                  <div className="text-white text-xl font-bold leading-8">{currentPersonality.name}</div>
-                  <div className="text-white/50 text-base font-normal leading-6 ">
-                    {currentPersonality.subtitle}
-                  </div>
-                </div>
-
-                {currentPersonalityIndex !== selectedPersonalityIndex && (
-                  <Button width="144px" height="60px"
-                    onClick={handlePersonalitySelection}
-                    className="w-[144px] h-[60px] bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-6 py-2 rounded-full text-xl font-medium transition-colors"
-                  >
-                    Use this
-                  </Button>
-                )}
-
-
-              </motion.div>
-            </motion.div>
-
-            {/* Navigation arrows positioned absolutely */}
-
-          </div>
-        </Popover>
-      </div>
-
-      <div className="relative">
-        <Toggle
+          "Make me a cartoon"
+        </Button>
+        
+        {/* <Toggle
           ref={filtersRef}
           isToggled={filtersEnabled}
           onToggle={handleFiltersToggle}
@@ -1024,8 +1069,8 @@ function AvatarVisualControls() {
               onClick={() => handleFilterSelection('Add a funny hat')}
             >
               <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Add a funny hat'
-                  ? 'gradient-loading'
-                  : 'text-white'
+                ? 'gradient-loading'
+                : 'text-white'
                 }`}>Add a funny hat</div>
             </div>
             <div className="w-full h-px relative bg-neutral-100/10"></div>
@@ -1034,8 +1079,8 @@ function AvatarVisualControls() {
               onClick={() => handleFilterSelection('Make me Pixar style')}
             >
               <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Make me Pixar style'
-                  ? 'gradient-loading'
-                  : 'text-white'
+                ? 'gradient-loading'
+                : 'text-white'
                 }`}>Make me Pixar style</div>
             </div>
             <div className="w-full h-px relative bg-neutral-100/10"></div>
@@ -1044,13 +1089,12 @@ function AvatarVisualControls() {
               onClick={() => handleFilterSelection('Give me studio lighting')}
             >
               <div className={`justify-start text-xl font-normal leading-7 ${loadingFilter === 'Give me studio lighting'
-                  ? 'gradient-loading'
-                  : 'text-white'
+                ? 'gradient-loading'
+                : 'text-white'
                 }`}>Give me studio lighting</div>
             </div>
           </div>
-        </Popover>
-      </div>
+        </Popover> */}
     </div>
   );
 }
@@ -1076,13 +1120,13 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
           detail: { photo: null }
         }));
       }
-      
+
       // Show Alexa transition during avatar generation
       onShowAlexaTransition();
-      
+
       // Step 1: Generate an image using OpenAI (similar to enhance-image API)
       console.log('🎨 Generating avatar image with OpenAI...');
-      
+
       const formData = new FormData();
       // Create a base prompt and append user prompt if provided
       const basePrompt = "Create a professional headshot portrait of a person for use as an avatar. The person should have a friendly, approachable expression, good lighting, and be suitable for professional use.";
@@ -1091,7 +1135,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       }
       const fullPrompt = userPrompt ? `${basePrompt} ${userPrompt}` : basePrompt;
       formData.append("prompt", fullPrompt);
-      
+
       const generateResponse = await fetch("/api/generate-image", {
         method: "POST",
         body: formData,
@@ -1102,7 +1146,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
       }
 
       const generateResult = await generateResponse.json();
-      
+
       if (!generateResult.success || !generateResult.generatedImage) {
         throw new Error("No generated image received from OpenAI");
       }
@@ -1117,7 +1161,7 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
         bytes[i] = binaryString.charCodeAt(i);
       }
       const imageBlob = new Blob([bytes], { type: 'image/jpeg' });
-      
+
       // Update the loading avatar with the generated image
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('showLoadingAvatar', {
@@ -1159,13 +1203,14 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
 
     window.addEventListener('photoCaptureStateChange', handleStateChange as EventListener);
     window.addEventListener('generateAvatarRequest', handleGenerateAvatarRequest as EventListener);
-    
+
     return () => {
       window.removeEventListener('photoCaptureStateChange', handleStateChange as EventListener);
       window.removeEventListener('generateAvatarRequest', handleGenerateAvatarRequest as EventListener);
+      window.removeEventListener('generateAvatarRequest', handleGenerateAvatarRequest as EventListener);
     };
   }, [handleGenerateAvatar]);
-  
+
   const handleStartCamera = useCallback(async () => {
     console.log('🎥 Frontend Button Clicked: startCamera called');
     console.log('🎥 photoCaptureRef.current:', photoCaptureRef.current);
@@ -1233,17 +1278,17 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
         <AnimatePresence mode="wait">
           {!isStreaming && !capturedPhoto && (!avatarExists || showPhotoCaptureButton) && (
             <div className="flex gap-4">
-            <Button key="start" onClick={handleStartCamera}>
-              "Use a photo"
-            </Button>
+              <Button key="start" onClick={handleStartCamera}>
+                "Use a photo"
+              </Button>
 
-             <Button key="generate" onClick={() => handleGenerateAvatar()}>
-              "Make a new avatar"
-            </Button>
-              
+              <Button key="generate" onClick={() => handleGenerateAvatar()}>
+                "Make a new avatar"
+              </Button>
+
             </div>
           )}
-          
+
 
           {isStreaming && (
             <Button key="capture" onClick={handleCapturePhoto}>
