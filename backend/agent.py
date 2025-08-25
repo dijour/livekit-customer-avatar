@@ -116,7 +116,7 @@ class Config:
 class Msg:
     ALEXA_GREETING = (
         "Hey! I'm here to help you create your personalized avatar. "
-        "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, tell me 'use a photo' or 'make a new avatar'."
+        "We're about to make a digital copy of you! Tell me a bit about yourself, and when you're ready, tell me 'use a photo' or describe your avatar."
     )
 
     ALEXA_INSTRUCTIONS = (
@@ -429,7 +429,7 @@ class Assistant(Agent):
     # ---- Function Tools ----
     @function_tool()
     async def generate_avatar(self, context: RunContext, prompt: str = "") -> str:
-        """Generate an avatar for the user with an optional custom prompt (triggered when user says 'make a new avatar" or requests avatar generation with a custom description). 
+        """Generate an avatar for the user with an optional custom prompt (triggered when user says 'make a new avatar" or when the user requests avatar generation with a custom description). 
         
         Args:
             prompt (str, optional): Custom prompt for avatar generation. Defaults to "".
@@ -446,6 +446,29 @@ class Assistant(Agent):
             
         except Exception as e:
             return f"I couldn't generate the avatar: {e}"
+            
+    @function_tool()
+    async def modify_avatar(self, context: RunContext, filter_prompt: str = "") -> str:
+        """Modify an existing avatar with a filter prompt. Only works if an avatar already exists.
+        
+        Args:
+            filter_prompt (str, optional): Custom prompt for avatar modification. Defaults to "".
+        """
+        try:
+            # Check if avatar exists by checking avatar ID from multiple sources
+
+            pid = await _get_first_remote_participant(self.room)
+            if not pid:
+                return "I don't see you connected yet."
+            
+            # Call the frontend modifyAvatar RPC method with the filter prompt
+            await _rpc_frontend(self.room, pid, method="modifyAvatar", payload=f'{{"prompt": "{filter_prompt}"}}')
+            prompt_message = f" with filter: '{filter_prompt}'" if filter_prompt else ""
+            return f"Applying modifications to your avatar{prompt_message}..."
+            
+        except Exception as e:
+            print(e or "Unknown error")
+            return f"I couldn't modify the avatar: {e}"
 
     @function_tool()
     async def start_camera(self, context: RunContext) -> str:

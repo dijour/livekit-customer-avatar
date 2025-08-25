@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 import path from 'path';
 import fs from 'fs';
+import { Blob } from 'buffer';
+
+// Polyfill File for Node.js environments before Node 20
+if (typeof globalThis.File === 'undefined') {
+  const { File: NodeFile } = require('node:buffer');
+  globalThis.File = NodeFile;
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
