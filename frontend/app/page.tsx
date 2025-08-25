@@ -26,7 +26,6 @@ import type { RoomContextType } from "../types/room";
 
 export default function Page() {
   const [room] = useState(new Room());
-  const [isSimulation, setIsSimulation] = useState(false);
   const [isAutoConnecting, setIsAutoConnecting] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(true);
@@ -279,7 +278,6 @@ export default function Page() {
     // Reset all states
     setHasUserInteracted(false);
     setIsAutoConnecting(false);
-    setIsSimulation(false);
 
     // Reset avatar setup
     avatarSetup.reset();
@@ -340,7 +338,7 @@ export default function Page() {
   return (
     // anchor
     <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="h-screen bg-[#0E1A27] flex flex-col">
-      <RoomContext.Provider value={Object.assign(room, { isSimulation, setIsSimulation }) as RoomContextType}>
+      <RoomContext.Provider value={room as RoomContextType}>
 
 
         {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
@@ -425,8 +423,6 @@ export default function Page() {
         {/* Always show voice assistant for agent connection */}
         <SimpleVoiceAssistant
           onConnectButtonClicked={onConnectButtonClicked}
-          isSimulation={isSimulation}
-          setIsSimulation={setIsSimulation}
           isAutoConnecting={isAutoConnecting}
           photoCaptureRef={photoCaptureRef}
           onResetExperience={handleResetExperience}
@@ -458,8 +454,6 @@ export default function Page() {
 
 function SimpleVoiceAssistant(props: {
   onConnectButtonClicked: () => void;
-  isSimulation: boolean;
-  setIsSimulation: (value: boolean) => void;
   isAutoConnecting: boolean;
   photoCaptureRef: React.RefObject<PhotoCaptureRef | null>;
   onResetExperience: () => Promise<void>;
@@ -579,18 +573,6 @@ function SimpleVoiceAssistant(props: {
 
 function AgentVisualizer() {
   const { videoTrack } = useVoiceAssistant();
-  const { isSimulation } = useContext(RoomContext) as RoomContextType;
-  if (isSimulation) {
-    return (
-      <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
-        <MaskedMediaView>
-          <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-            <img src="/images/martha.png" alt="AI Agent" className="w-full h-full object-cover" />
-          </div>
-        </MaskedMediaView>
-      </div>
-    );
-  }
   if (videoTrack) {
     return (
       <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>

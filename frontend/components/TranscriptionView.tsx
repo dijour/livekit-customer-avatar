@@ -1,18 +1,12 @@
 import useCombinedTranscriptions from "@hooks/useCombinedTranscriptions";
-import { RoomContext } from "@livekit/components-react";
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { RoomContextType } from "../types/room";
 
 export default function TranscriptionView() {
-  const { isSimulation } = React.useContext(RoomContext) as RoomContextType;
   const combinedTranscriptions = useCombinedTranscriptions();
-  const dummyTranscriptions = React.useMemo(() => [
-    { id: '4', role: 'assistant', text: 'I see. There are several approaches to state management in React. Could you tell me more about your specific requirements?' }
-  ], []);
 
   // Get only the most recent assistant message
-  const transcriptions = isSimulation ? dummyTranscriptions : combinedTranscriptions;
+  const transcriptions = combinedTranscriptions;
   const mostRecentAssistantMessage = React.useMemo(() => {
     const assistantMessages = transcriptions.filter(segment => segment.role === 'assistant');
     return assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
