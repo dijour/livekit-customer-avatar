@@ -3,7 +3,7 @@ import { useRoomData } from './useRoomData';
 
 // Types for the avatar setup flow
 export type AvatarSetupState = {
-  step: 'photo-capture' | 'ready' | 'skipped';
+  step: 'photo-capture' | 'creating-avatar' | 'ready' | 'skipped';
   userPhoto: Blob | null;
   assetId: string | null;
   error: string | null;
@@ -28,20 +28,32 @@ const initialState: AvatarSetupState = {
 function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction): AvatarSetupState {
   switch (action.type) {
     case 'PHOTO_CAPTURED':
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('showLoadingAvatar', {
+          detail: { photo: action.payload }
+        }));
+      }
       return {
         ...state,
         userPhoto: action.payload,
-        step: 'ready',
+        step: 'creating-avatar',
         error: null,
       };
     
     case 'AVATAR_CREATION_STARTED':
+      // Dispatch event to show floating loading avatar
+      
       return {
         ...state,
+        step: 'creating-avatar',
         error: null,
       };
     
     case 'AVATAR_CREATED':
+      // Dispatch event to hide floating loading avatar
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hideLoadingAvatar'));
+      }
       return {
         ...state,
         assetId: action.payload,
@@ -50,6 +62,10 @@ function avatarSetupReducer(state: AvatarSetupState, action: AvatarSetupAction):
       };
     
     case 'AVATAR_CREATION_FAILED':
+      // Dispatch event to hide floating loading avatar on failure
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hideLoadingAvatar'));
+      }
       return {
         ...state,
         step: 'ready', // Continue anyway
@@ -189,6 +205,7 @@ export function useAvatarSetup(voiceCloningEnabled: boolean = false) {
     reset,
     // Computed properties for easier UI logic
     showPhotoCapture: state.step === 'photo-capture',
+    isCreatingAvatar: state.step === 'creating-avatar',
     isReady: state.step === 'ready' || state.step === 'skipped',
     canStartConversation: state.step === 'ready' || state.step === 'skipped',
   };

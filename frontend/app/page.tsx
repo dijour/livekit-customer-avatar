@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
 import { Popover } from '../components/Popover';
 import { MaskedMediaView } from "@components/MaskedMediaView";
+import { FloatingLoadingAvatar } from "@components/LoadingAvatar";
 import { useAvatarSetup } from '../hooks/useAvatarSetup';
 
 import { useRoomData } from '../hooks/useRoomData';
@@ -340,13 +341,13 @@ export default function Page() {
   // Show start experience button if user hasn't interacted yet
   if (!hasUserInteracted) {
     return (
-      <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="h-screen bg-[#0E1A27] flex flex-col items-center justify-center">
+      <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif'}} className="h-screen flex flex-col items-center justify-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center max-w-md mx-auto px-6"
         >
-
+          <div className="absolute inset-0 bg-[#0E1A27] opacity-50" style={{ zIndex: -1000, backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }}> </div>
           <Button onClick={handleStartExperience}>Start</Button>
 
           <motion.p
@@ -364,11 +365,12 @@ export default function Page() {
 
   return (
     // anchor
-    <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif', backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }} className="h-screen bg-[#0E1A27] flex flex-col">
+    <main data-lk-theme="default" style={{ fontFamily: 'Amazon Ember Display, system-ui, sans-serif' }} className="h-screen flex flex-col">
       <RoomContext.Provider value={room as RoomContextType}>
 
-
         {/* Always show voice assistant for agent connection */}
+        <div className="absolute inset-0 bg-[#0E1A27] opacity-50" style={{ zIndex: -1000, backgroundImage: 'url("/images/Bkg 15 Hub XL Landscape Dark.svg")', backgroundSize: 'cover', backgroundPosition: 'center' }}> </div>
+
         <SimpleVoiceAssistant
           onConnectButtonClicked={onConnectButtonClicked}
           isAutoConnecting={isAutoConnecting}
@@ -379,6 +381,10 @@ export default function Page() {
           onShowAlexaTransition={() => setShowAlexaTransition(true)}
           avatarSetup={avatarSetup}
         />
+
+        {/* Floating Loading Avatar */}
+        <FloatingLoadingAvatar />
+
 
         {/* Error notification */}
         <AnimatePresence>
@@ -411,7 +417,7 @@ function SimpleVoiceAssistant(props: {
   onShowAlexaTransition: () => void;
   avatarSetup: any;
 }) {
-  const { state: agentState } = useVoiceAssistant();
+  const { state: agentState, videoTrack } = useVoiceAssistant();
   const { localParticipant } = useLocalParticipant();
   const [isMuted, setIsMuted] = useState(false);
   const [showCaptions, setShowCaptions] = useState(true);
@@ -447,6 +453,20 @@ function SimpleVoiceAssistant(props: {
     }, [props.avatarExists]);
   return (
     <div className="h-screen flex flex-col relative">
+      
+      {/* Main content area with AgentVisualizer in normal document flow */}
+      <div className="flex-1 flex items-center justify-center">
+        
+        
+
+        {agentState !== "disconnected" && videoTrack && (
+          <div className="pointer-events-none" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AgentVisualizer avatarExists={props.avatarExists}/>
+          </div>
+        )}
+
+      </div>
+      
       {/* Show photo capture overlay when no avatar exists or when triggered by agent */}
       <AnimatePresence mode="wait">
         {(!props.avatarSetup.state.assetId || props.avatarSetup.showPhotoCapture) && (
@@ -474,10 +494,6 @@ function SimpleVoiceAssistant(props: {
       <AnimatePresence mode="wait">
         {agentState !== "disconnected" && (
           <>
-            <div className="flex-1 flex items-center justify-center">
-              <AgentVisualizer avatarExists={props.avatarExists}/>
-            </div>
-
             {/* Photo capture top control bar */}
             <div className="fixed top-0 left-0 right-0 z-40">
               <div className="relative px-[48px] py-[36px]">
@@ -557,30 +573,17 @@ function SimpleVoiceAssistant(props: {
 
 function AgentVisualizer(props: { avatarExists: boolean }) {
   const { videoTrack } = useVoiceAssistant();
-  // if (props.avatarExists && !videoTrack) {
-  //   return (
-  //     <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto bg-red-500" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
-  //       <MaskedMediaView
-  //       </MaskedMediaView>
-  //     </div>
-  //   );  
-  // }
-  // else 
-  if (videoTrack) {
-    return (
-      
-      <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
-        <MaskedMediaView>
-          <VideoTrack trackRef={videoTrack} />
-        </MaskedMediaView>
-      </div>
-    );
-  }
-  else {
-    return (
-      null
-    );
-  }
+  
+  // Show video track when available
+  if (!videoTrack) return null;
+  
+  return (
+    <div className="relative rounded-2xl overflow-hidden aspect-square mx-auto" style={{ width: 'min(80vh, 80vw)', height: 'min(80vh, 80vw)' }}>
+      <MaskedMediaView>
+        <VideoTrack trackRef={videoTrack} />
+      </MaskedMediaView>
+    </div>
+  );
 }
 
 
@@ -1065,6 +1068,18 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
     console.log('🎥Frontend Button Clicked: generateAvatar called');
 
     try {
+      // Show loading avatar immediately when function is called
+      console.log('🔄 Showing loading avatar immediately');
+      if (typeof window !== 'undefined') {
+        // Show loading avatar without a photo initially
+        window.dispatchEvent(new CustomEvent('showLoadingAvatar', {
+          detail: { photo: null }
+        }));
+      }
+      
+      // Show Alexa transition during avatar generation
+      onShowAlexaTransition();
+      
       // Step 1: Generate an image using OpenAI (similar to enhance-image API)
       console.log('🎨 Generating avatar image with OpenAI...');
       
@@ -1102,19 +1117,27 @@ function PhotoCaptureControls({ photoCaptureRef, showPhotoCaptureButton, avatarE
         bytes[i] = binaryString.charCodeAt(i);
       }
       const imageBlob = new Blob([bytes], { type: 'image/jpeg' });
+      
+      // Update the loading avatar with the generated image
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('showLoadingAvatar', {
+          detail: { photo: imageBlob }
+        }));
+      }
 
       // Step 3: Use avatarSetup.handlePhotoCapture to properly handle the generated image
       // This will trigger the same flow as photo capture: create avatar, update state, and switch modes
       console.log('🎭 Processing generated image through avatar setup...');
       await avatarSetup.handlePhotoCapture(imageBlob);
 
-      // Show Alexa transition during avatar generation (same as photo capture)
-      onShowAlexaTransition();
-
       console.log('🎉 Avatar generation and setup completed successfully!');
 
     } catch (error) {
       console.error('❌ Avatar generation failed:', error);
+      // Hide loading avatar on error
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('hideLoadingAvatar'));
+      }
       // You might want to show an error notification to the user here
     }
   }, [avatarSetup, onShowAlexaTransition]);
