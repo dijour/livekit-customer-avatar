@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
-import requests
+from typing import Annotated
 from dataclasses import dataclass
 from datetime import datetime
 from typing import AsyncIterable, List, Optional, Tuple
@@ -431,10 +432,12 @@ class Assistant(Agent):
             personality_descriptions = {
                 "Core": "I've switched to my Core personality, so I'll be helpful, knowledgeable, and professional in my responses.",
                 "Minimalist": "I've switched to my Minimalist personality, so I'll be direct, efficient, and get straight to the point.",
+                "Disruptor": "I've switched to my Disruptor personality, so I'll be a bit snarky, crack a joke or two, and keep things fun.",
                 "Supporter": "I've switched to my Supporter personality, so I'll be encouraging, uplifting, and help you feel confident!",
                 "Free Spirit": "I've switched to my Free Spirit personality, so I'll be laid-back, chill, and spread good vibes, dude.",
                 "Dreamer": "I've switched to my Dreamer personality, so I'll be imaginative, spiritual, and think cosmically big.",
-                "Rockstar": "I've switched to my Rockstar personality, so I'll be confident, bold, and absolutely legendary."
+                "Cyber Cadet": "I've switched to my Cyber Cadet personality, so I'll be inquisitive and forward thinking.",
+                "Silly Owl": "I've switched to my Silly Owl personality, so I'll be gentle, comforting, and playful."
             }
             
             confirmation_message = personality_descriptions.get(personality_name, f"I've changed my personality to {personality_name}.")
@@ -655,6 +658,9 @@ class Orchestrator:
         # Start polling avatar-state (if requests available)
         asyncio.create_task(self._poll_avatar_state())
         
+        # Start monitoring for avatar restart requests
+        asyncio.create_task(self.monitor_avatar_restart())
+        
         # Register cleanup handler
         self._register_cleanup()
     
@@ -851,19 +857,82 @@ class Orchestrator:
             )
             await self.avatar.start(self.session, room=self.ctx.room)
             
-            # Debug: Print TTS info after successful avatar start
-            print(f"🔍 TTS Debug - session._tts: {self.session._tts}")
-            # speech_handle = self.session.say(f"I've applied the filter!")
-            print(f"🔍 session.say() returned speech_handle: {speech_handle}")
+            # Wait a moment for the avatar session to fully initialize
+            await asyncio.sleep(1.0)
             
-            print(f"🔍 About to await speech_handle...")
-            await speech_handle
-            print(f"🔍 speech_handle await completed successfully")
+            # Speak the confirmation message with proper error handling
+            try:
+                print(f"🔍 TTS Debug - session._tts: {self.session._tts}")
+                speech_handle = self.session.say(f"I've applied the filter!")
+                print(f"🔍 session.say() returned speech_handle: {speech_handle}")
+                
+                print(f"🔍 About to await speech_handle...")
+                await speech_handle
+                print(f"🔍 speech_handle await completed successfully")
+            except Exception as speech_error:
+                print(f"⚠️ Failed to speak filter confirmation: {speech_error}")
+                # Continue anyway - the filter was applied successfully
             
             print(f"🎨 Filter avatar session started with ID: {filter_id}")
         except Exception as e:
             print(f"⚠️ Failed to apply filter {filter_id}: {e}")
-            # Try to recover by restarting the original avatar session if needed
+            # Try to recover by restarting the original avatar session
+            await self._restart_avatar_session()
+
+    async def _restart_avatar_session(self) -> None:
+        """Restart the avatar session to recover from connection issues."""
+        try:
+            print("🔄 Attempting to restart avatar session...")
+            
+            # Get the current avatar ID from file or use default
+            current_avatar_id = None
+            try:
+                with open("current_asset_id.txt", "r") as f:
+                    current_avatar_id = f.read().strip()
+            except FileNotFoundError:
+                current_avatar_id = "0396e7f6-252a-4bd8-8f41-e8d1ecd6367e"  # Default Martha avatar
+            
+            if self.avatar:
+                print("🛑 Stopping current avatar session...")
+                await self.avatar.stop()
+                
+            print(f"🚀 Starting new avatar session with ID: {current_avatar_id}")
+            self.avatar = hedra.AvatarSession(
+                avatar_id=current_avatar_id,
+                avatar_participant_identity="hedra-avatar" + current_avatar_id,
+            )
+            await self.avatar.start(self.session, room=self.ctx.room)
+            
+            # Announce the restart
+            speech_handle = self.session.say("I'm back! Sorry about that, I had a little technical hiccup.")
+            await speech_handle
+            
+            print("✅ Avatar session restarted successfully")
+            
+        except Exception as e:
+            print(f"❌ Failed to restart avatar session: {e}")
+
+    async def monitor_avatar_restart(self) -> None:
+        """Monitor for avatar restart requests from the frontend."""
+        restart_file = "restart_avatar.txt"
+        last_modified = 0
+        
+        while True:
+            try:
+                if os.path.exists(restart_file):
+                    current_modified = os.path.getmtime(restart_file)
+                    if current_modified > last_modified:
+                        print("🔄 Avatar restart requested via file signal")
+                        last_modified = current_modified
+                        await self._restart_avatar_session()
+                        # Clean up the signal file
+                        os.remove(restart_file)
+                        
+                await asyncio.sleep(1)  # Check every second
+                
+            except Exception as e:
+                print(f"⚠️ Error monitoring avatar restart: {e}")
+                await asyncio.sleep(5)  # Wait longer on error
 
     async def _store_avatar_id_in_room(self, avatar_id: str) -> None:
         """Store avatar ID in local participant metadata for immediate access"""

@@ -35,7 +35,9 @@ import type { ConnectionDetails } from "./api/connection-details/route";
 
 export default function Page() {
   const [room] = useState(new Room());
+  const [error, setError] = useState<string>("");
   const [isAutoConnecting, setIsAutoConnecting] = useState(false);
+  const [isRestartingAvatar, setIsRestartingAvatar] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [showPhotoCaptureButton, setShowPhotoCaptureButton] = useState(true);
   const [showAlexaTransition, setShowAlexaTransition] = useState(false);
@@ -1399,6 +1401,27 @@ function PhotoCaptureControls({
       console.log("📸 ERROR: PhotoCapture retakePhoto method not available");
     }
   }, [photoCaptureRef]);
+
+  const handleRestartAvatar = useCallback(async () => {
+    try {
+      setIsRestartingAvatar(true);
+      console.log("🔄 Restarting avatar...");
+      
+      const response = await fetch("/api/restart-avatar", {
+        method: "POST",
+      });
+      
+      if (response.ok) {
+        console.log("✅ Avatar restart signal sent");
+      } else {
+        console.error("❌ Failed to restart avatar");
+      }
+    } catch (error) {
+      console.error("❌ Error restarting avatar:", error);
+    } finally {
+      setIsRestartingAvatar(false);
+    }
+  }, []);
 
   return (
     <>

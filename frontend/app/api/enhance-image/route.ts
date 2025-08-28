@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
-import path from 'path';
-import fs from 'fs';
-import { Blob } from 'buffer';
 
 // Polyfill File for Node.js environments before Node 20
 if (typeof globalThis.File === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { File: NodeFile } = require('node:buffer');
   globalThis.File = NodeFile;
 }
@@ -57,14 +55,8 @@ export async function POST(request: NextRequest) {
     });
     console.log("File object created successfully");
 
-    // Debug: Save the image being sent to OpenAI
-    const debugDir = path.join(process.cwd(), "debug");
-    if (!fs.existsSync(debugDir)) {
-      fs.mkdirSync(debugDir, { recursive: true });
-    }
-    const debugImagePath = path.join(debugDir, `input-${Date.now()}.jpg`);
-    fs.writeFileSync(debugImagePath, buffer);
-    console.log("Debug: Saved input image to:", debugImagePath);
+    // Debug: Log image info (removed file system operations for production compatibility)
+    console.log("Debug: Input image buffer size:", buffer.length, "bytes");
     
     // Log image properties
     console.log("=== Image Debug Info ===");
@@ -102,7 +94,7 @@ export async function POST(request: NextRequest) {
     // Check if we got base64 data directly or a URL
     const responseData = imageResponse.data[0];
     const imageUrl = responseData?.url;
-    const base64Data = responseData?.b64_json || (responseData as any)?.data;
+    const base64Data = responseData?.b64_json || (responseData as Record<string, unknown>)?.data as string;
     
     console.log("Image URL received:", imageUrl);
     console.log("Base64 data present:", !!base64Data);
@@ -159,7 +151,7 @@ export async function POST(request: NextRequest) {
     
     // Check for specific OpenAI errors
     if (error && typeof error === 'object' && 'error' in error) {
-      console.error("OpenAI API error details:", (error as any).error);
+      console.error("OpenAI API error details:", (error as Record<string, unknown>).error);
     }
     
     // Check if this is a safety system rejection
